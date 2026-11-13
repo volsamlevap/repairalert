@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/Protocol.cs" Link="Protocol.cs" />
+    <Compile Include="../src/EnterSend.cs" Link="EnterSend.cs" />
+    <Compile Include="../src/PeerConnection.cs" Link="PeerConnection.cs" />
+    <Compile Include="../src/StoragePaths.cs" Link="StoragePaths.cs" />
+    <Compile Include="../src/FileAndReportServices.cs" Link="FileAndReportServices.cs" />
+    <Compile Include="../src/SessionPersistence.cs" Link="SessionPersistence.cs" />
+    <Compile Include="../src/MasterJobPersistence.cs" Link="MasterJobPersistence.cs" />
+    <Compile Include="../src/JobTiming.cs" Link="JobTiming.cs" />
+    <Compile Include="../src/SoundCatalog.cs" Link="SoundCatalog.cs" />
+    <Compile Include="../src/ReliableMessageLogic.cs" Link="ReliableMessageLogic.cs" />
+    <Compile Include="../src/AtomicFileStore.cs" Link="AtomicFileStore.cs" />
+    <Compile Include="../src/AppLog.cs" Link="AppLog.cs" />
+    <Compile Include="../src/SingleInstance.cs" Link="SingleInstance.cs" />
+    <Compile Include="../src/PendingReports.cs" Link="PendingReports.cs" />
+    <Compile Include="../src/SecurityService.cs" Link="SecurityService.cs" />
+    <Compile Include="../src/PairingSession.cs" Link="PairingSession.cs" />
+    <Compile Include="../src/IncomingTransfers.cs" Link="IncomingTransfers.cs" />
+    <Compile Include="../src/LanDiscovery.cs" Link="LanDiscovery.cs" />
+    <Compile Include="../src/JobBroadcast.cs" Link="JobBroadcast.cs" />
+  </ItemGroup>
+</Project>

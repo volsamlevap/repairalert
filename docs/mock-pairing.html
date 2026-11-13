@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "DejaVu Sans", sans-serif; background: #f3f3f3; overflow: hidden; }
+  .win { width: 421px; background: #f9f9f9; border: 1px solid #c9c9c9; border-radius: 8px; overflow: hidden; }
+  .titlebar { display: flex; align-items: center; gap: 8px; background: #efefef; border-bottom: 1px solid #e0e0e0; padding: 9px 12px; }
+  .dots { display: flex; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #c7c7c7; }
+  .titletext { font-size: 12px; color: #444; }
+  .content { padding: 22px 24px 20px; background: #ffffff; }
+  h1 { font-size: 18px; font-weight: 600; color: #1b1b1b; margin-bottom: 10px; }
+  .desc { font-size: 12px; color: #6b6b6b; line-height: 1.5; margin-bottom: 14px; }
+  .code { background: #f0f0f0; border: 1px solid #e2e2e2; border-radius: 6px; height: 46px;
+          display: flex; align-items: center; justify-content: center; gap: 22px; margin-bottom: 12px; }
+  .code span { font-size: 22px; font-weight: 700; color: #1b1b1b; }
+  .row { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+  .btn-quiet { background: none; border: none; color: #555; font-size: 13px; padding: 8px 12px; }
+  .btn-primary { background: #0b6bcb; color: #fff; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; padding: 9px 18px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="titlebar">
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    <div class="titletext">Сопряжение с мастером — СЕРВИС ЛЕГКО</div>
+  </div>
+  <div class="content">
+    <h1>Введите код с компьютера мастера</h1>
+    <div class="desc">Попросите мастера нажать «Добавить компьютер» в настройках (раздел «Подключение») — он увидит одноразовый код из 6 цифр. Код действует 5 минут. Это нужно один раз — дальше программа подключается сама.</div>
+    <div class="code"><span>4</span><span>8</span><span>2</span><span>9</span><span>1</span><span>5</span></div>
+    <div class="row">
+      <button class="btn-quiet">Отмена</button>
+      <button class="btn-primary">Подключить</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
