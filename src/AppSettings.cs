@@ -22,11 +22,42 @@ internal sealed class AppSettings
     public string QuietFrom { get; set; } = "";
     public string QuietTo { get; set; } = "";
     public bool StartHidden { get; set; } = true;
+    /// <summary>Полностью закрываться при «Сменить пользователя» Windows (и отключении RDP).
+    /// При выходе из учётной записи и выключении программа закрывается всегда.</summary>
+    public bool CloseOnSessionSwitch { get; set; } = true;
     public string Theme { get; set; } = "system";
     public List<string> RecentMasters { get; set; } = new();
     public int ReminderMinutes { get; set; } = 5;
 
     public void RememberMaster(string address) => RecentMastersLogic.Remember(RecentMasters, address);
+}
+
+internal static class SettingsUi
+{
+    public const string CloseOnSessionSwitchText =
+        "Полностью закрываться при смене пользователя или выходе из Windows";
+
+    public const string CloseOnSessionSwitchHint =
+        "При выходе из Windows и выключении компьютера программа закрывается всегда. " +
+        "Если галочку снять, при «Сменить пользователя» программа продолжит работать в фоне.";
+
+    /// <summary>Третья галочка автозапуска — общая для мастера первого запуска и панели «Настройки».</summary>
+    public static System.Windows.Controls.CheckBox CloseOnSessionSwitchCheckBox(AppSettings settings,
+        System.Windows.Thickness margin)
+    {
+        var box = new System.Windows.Controls.CheckBox
+        {
+            Content = CloseOnSessionSwitchText,
+            ToolTip = CloseOnSessionSwitchHint,
+            IsChecked = settings.CloseOnSessionSwitch,
+            Foreground = Ui.Muted,
+            FontSize = 12,
+            Margin = margin
+        };
+        box.Checked += (_, _) => { settings.CloseOnSessionSwitch = true; SettingsStore.Save(settings); };
+        box.Unchecked += (_, _) => { settings.CloseOnSessionSwitch = false; SettingsStore.Save(settings); };
+        return box;
+    }
 }
 
 internal static class SettingsStore

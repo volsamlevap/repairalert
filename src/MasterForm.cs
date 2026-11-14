@@ -22,6 +22,10 @@ internal sealed class MasterForm : ChatHostForm
     private readonly List<string> _pendingAlerts = new();
     private readonly Dictionary<string, DateTime> _postponed = new();
     private readonly DispatcherTimer _postponeTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    // Повторный запуск сервера, пока порт 47891 занят (например, копией мастера
+    // у другого пользователя Windows, которая ещё закрывается после «Сменить пользователя»)
+    private readonly DispatcherTimer _serverRetryTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private bool _portBusyLogged;
     // Номера удалённых заявок: удалённое не воскресает при переподключении менеджеров
     private readonly DeletedJobIds _deletedJobs = DeletedJobsStore.Load();
 
@@ -450,6 +454,7 @@ internal sealed class MasterForm : ChatHostForm
         _jobElapsedTimer.Start();
         _postponeTimer.Tick += (_, _) => ShowNextRequestAlert();
         _postponeTimer.Start();
+        _serverRetryTimer.Tick += (_, _) => StartServer();
         Loaded += (_, _) => StartServer();
         _networkRefreshTimer.Tick += (_, _) => { _networkRefreshTimer.Stop(); RefreshAddresses(); };
         NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
@@ -649,6 +654,7 @@ internal sealed class MasterForm : ChatHostForm
         startHidden.Checked += (_, _) => { _settings.StartHidden = true; SettingsStore.Save(_settings); };
         startHidden.Unchecked += (_, _) => { _settings.StartHidden = false; SettingsStore.Save(_settings); };
         panel.Children.Add(startHidden);
+        panel.Children.Add(SettingsUi.CloseOnSessionSwitchCheckBox(_settings, new Thickness(0, 0, 0, 8)));
         panel.Children.Add(Ui.SectionTitle("Тихие часы"));
         panel.Children.Add(Ui.Note("В это время звуковые сигналы выключены, визуальные уведомления остаются. Оставьте поля пустыми, чтобы выключить режим."));
         var quietRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
@@ -873,11 +879,13 @@ internal sealed class MasterForm : ChatHostForm
 
     private void StartServer()
     {
+        if (_closing) return;
         try
         {
             RefreshAddresses();
             _listener = new TcpListener(IPAddress.Any, Port);
             _listener.Start();
+            _serverRetryTimer.Stop();
             AppLog.Info("Сервер запущен на порту " + Port);
             _discovery = DiscoveryResponder.TryStart(
                 Environment.MachineName, Port, SecurityService.AppVersion);
@@ -886,12 +894,28 @@ internal sealed class MasterForm : ChatHostForm
         }
         catch (Exception ex)
         {
-            AppLog.Error("Не удалось запустить сервер", ex);
+            try { _listener?.Stop(); } catch { }
+            _listener = null;
             var socket = ex as System.Net.Sockets.SocketException
                 ?? ex.InnerException as System.Net.Sockets.SocketException;
-            _statusText.Text = socket?.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse
-                ? "Порт 47891 уже занят другой программой — закройте вторую копию «СЕРВИС ЛЕГКО» или старую «РемонтСвязь» в трее и перезапустите программу"
-                : "Не удалось запустить сервер: " + ex.Message;
+            if (socket?.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse)
+            {
+                // Порт держит другая копия (часто — у другого пользователя Windows).
+                // Не сдаёмся: пробуем снова каждые 3 с, без перезапуска программы
+                if (!_portBusyLogged)
+                {
+                    AppLog.Error("Порт " + Port + " занят — сервер будет запущен, как только порт освободится");
+                    _portBusyLogged = true;
+                }
+                _statusText.Text = "Порт 47891 занят другой копией «СЕРВИС ЛЕГКО» (возможно, у другого пользователя Windows) " +
+                                   "или старой «РемонтСвязь». Сервер запустится сам, как только порт освободится…";
+                _serverRetryTimer.Start();
+            }
+            else
+            {
+                AppLog.Error("Не удалось запустить сервер", ex);
+                _statusText.Text = "Не удалось запустить сервер: " + ex.Message;
+            }
             _statusDot.Background = Ui.Danger;
         }
     }
@@ -1942,11 +1966,20 @@ internal sealed class MasterForm : ChatHostForm
     {
         var online = _managers.Values.Count(m => m.Connection is not null);
         var known = _managers.Count;
-        _statusDot.Background = online > 0 ? Ui.Green : Ui.Muted;
-        // Видно всех известных менеджеров и сколько из них сейчас на связи (2.35)
-        _statusText.Text = known == 0
-            ? "Сервер запущен · ожидание менеджеров"
-            : $"Сервер запущен · менеджеров в сети: {online} из {known}";
+        if (_serverRetryTimer.IsEnabled)
+        {
+            // Сервер ещё ждёт освобождения порта — не пишем «Сервер запущен»
+            _statusDot.Background = Ui.Danger;
+            _statusText.Text = "Порт 47891 занят другой копией «СЕРВИС ЛЕГКО» — сервер запустится сам, как только порт освободится…";
+        }
+        else
+        {
+            _statusDot.Background = online > 0 ? Ui.Green : Ui.Muted;
+            // Видно всех известных менеджеров и сколько из них сейчас на связи (2.35)
+            _statusText.Text = known == 0
+                ? "Сервер запущен · ожидание менеджеров"
+                : $"Сервер запущен · менеджеров в сети: {online} из {known}";
+        }
         var waiting = _managers.Values.SelectMany(m => m.Jobs.Values)
             .Count(job => !job.IsJobAccepted && !job.AwaitingReport && !job.ReportSaved);
         var working = _managers.Values.SelectMany(m => m.Jobs.Values).Count(job => job.IsJobAccepted);
@@ -2525,6 +2558,7 @@ internal sealed class MasterForm : ChatHostForm
         _networkRefreshTimer.Stop();
         _jobElapsedTimer.Stop();
         _postponeTimer.Stop();
+        _serverRetryTimer.Stop();
         PersistManagerJobs();
         try { _listener?.Stop(); } catch { }
         try { _discovery?.Dispose(); _discovery = null; } catch { }

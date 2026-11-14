@@ -12,10 +12,14 @@
     <ApplicationIcon>assets/app.ico</ApplicationIcon>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <Version>2.39.0</Version>
+    <Version>2.40.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="assets\app-icon.png" />
     <Resource Include="assets\paperclip.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- QR-код для загрузки файлов с телефона (MIT, без System.Drawing) -->
+    <PackageReference Include="QRCoder" Version="1.6.0" />
   </ItemGroup>
 </Project>

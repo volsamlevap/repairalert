@@ -35,11 +35,12 @@ internal abstract class ChatHostForm : BaseWindow
     {
         _chatPanel = panel;
         panel.MessageSend += (sessionId, text) => QueueTextMessage(sessionId, text);
-        panel.FileSend += (sessionId, path) => _ = QueueFileMessageAsync(sessionId, path);
+        panel.FileSend += (sessionId, path, batch) => _ = QueueFileMessageAsync(sessionId, path, batch);
         panel.CancelFiles += sessionId => CancelPendingFiles(sessionId);
         panel.MessageDeleteRequested += (sessionId, id) => DeleteQueuedMessage(sessionId, id);
         panel.MessageEditRequested += (sessionId, id, text) => EditMessage(sessionId, id, text);
         panel.PinToggled += (sessionId, id) => TogglePin(sessionId, id);
+        panel.PhoneUploadRequested += StartPhoneUpload;
         panel.Read += () => Alerts.Stop();
         panel.MessagesRead += ids =>
         {
@@ -372,37 +373,91 @@ internal abstract class ChatHostForm : BaseWindow
         _ = FlushOutboxAsync();
     }
 
-    protected async Task QueueFileMessageAsync(string sessionId, string path)
+    protected async Task QueueFileMessageAsync(string sessionId, string path, string batch = "")
     {
+        var error = await TryQueueFileMessageAsync(sessionId, path, batch);
+        if (error is not null)
+            MessageBox.Show(this, "Не удалось подготовить файл: " + error,
+                "Файл", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    /// <summary>
+    /// Загрузка с телефона по QR-коду в чат sessionId (2.40). Чат фиксируется здесь, при
+    /// создании сессии; телефон его не выбирает. Готовый файл сохраняется в «Полученные файлы»
+    /// этого компьютера и уходит в чат обычным механизмом вложений — как файл со скрепки.
+    /// </summary>
+    private void StartPhoneUpload(string sessionId)
+    {
+        if (sessionId.Length == 0) return;
+        // Все файлы одного QR-окна — одна «пачка»: в чате одно сообщение со списком
+        var batch = ChatPanel.NewBatchId();
+        PhoneUploadWindow.ShowFor(this, SessionTitle(sessionId), async (partPath, name) =>
+        {
+            string saved;
+            try { saved = FileTransferService.SaveCompletedPart(partPath, name); }
+            catch (Exception ex)
+            {
+                AppLog.Error("Не удалось сохранить файл с телефона", ex);
+                return "Не удалось сохранить файл на компьютере: " + ex.Message;
+            }
+            return await TryQueueFileMessageAsync(sessionId, saved, batch);
+        });
+    }
+
+    /// <summary>Поставить файл в очередь отправки чата. null — успех, иначе текст ошибки.
+    /// batch — номер пачки файлов, отправленных за раз (в чате — одно сообщение).</summary>
+    protected async Task<string?> TryQueueFileMessageAsync(string sessionId, string path, string batch = "")
+    {
+        // По одному: файлы пачки встают в чат в том порядке, в каком их выбрали,
+        // и подряд — иначе большая копия могла бы «разорвать» общее сообщение
+        await _queueFileGate.WaitAsync();
+        try { return await TryQueueFileMessageCoreAsync(sessionId, path, batch); }
+        finally { _queueFileGate.Release(); }
+    }
+
+    private readonly SemaphoreSlim _queueFileGate = new(1, 1);
+
+    private async Task<string?> TryQueueFileMessageCoreAsync(string sessionId, string path, string batch)
+    {
+        var cachedPath = "";
         try
         {
             var info = new FileInfo(path);
             if (info.Length > FileTransferService.MaxFileBytes)
                 throw new InvalidOperationException("Файл больше 5 ГБ.");
             var id = Guid.NewGuid().ToString("N");
-            var cachedPath = Path.Combine(ChatSessionStore.OutboxDirectory(_persistenceProfile.Length > 0 ? _persistenceProfile : "default"),
-                id + info.Extension);
+            cachedPath = Path.Combine(ChatSessionStore.OutboxDirectory(OutboxProfile), id + info.Extension);
             var (hash, size) = await IncomingTransferStore.HashAndCopyAsync(info.FullName, cachedPath);
-            var entry = new ChatEntry("Вы", "", DateTime.Now, true, info.Name, info.FullName, size, id, "В очереди");
+            var entry = new ChatEntry("Вы", "", DateTime.Now, true, info.Name, info.FullName, size, id, "В очереди",
+                batch);
             History(sessionId).Add(entry);
             if (_chatSessionId == sessionId) _chatPanel?.Append(entry);
+            var offer = AppMessage.FileOffer(sessionId, "", info.Name, size, hash, id);
+            // Номер пачки едет в поле Comment: оно есть и в 2.39, поэтому старые версии его
+            // просто не используют (подпись сообщения не ломается) и показывают файлы по одному
+            offer.Comment = batch;
             _outbox.Add(new OutgoingChatMessage
             {
                 SessionId = sessionId,
-                Message = AppMessage.FileOffer(sessionId, "", info.Name, size, hash, id),
+                Message = offer,
                 FilePath = cachedPath,
                 FileSize = size,
                 Sha256 = hash
             });
             PersistSession();
             UpdateQueueStatus();
-            await FlushOutboxAsync();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "Не удалось подготовить файл: " + ex.Message,
-                "Файл", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (cachedPath.Length > 0)
+            {
+                try { File.Delete(cachedPath); } catch { }
+            }
+            return ex.Message;
         }
+        // Файл уже в очереди и в истории чата; сама отправка идёт дальше своим ходом
+        try { await FlushOutboxAsync(); } catch { }
+        return null;
     }
 
     protected async Task FlushOutboxAsync()
@@ -647,8 +702,11 @@ internal abstract class ChatHostForm : BaseWindow
         }
         var meta = IncomingTransferStore.Begin(message.MessageId, sessionId, title, message.Sender,
             message.FileName, message.Size, message.Sha256);
+        // Номер пачки (файлы, отправленные за раз) — из поля Comment; только безопасные символы
+        var batch = message.Comment.Length is > 0 and <= 32 && message.Comment.All(char.IsLetterOrDigit)
+            ? message.Comment : "";
         var entry = new ChatEntry(message.Sender, "", message.SentAt.ToLocalTime(), false,
-            meta.FileName, "", meta.Size, message.MessageId, "receiving");
+            meta.FileName, "", meta.Size, message.MessageId, "receiving", batch);
         History(sessionId).Add(entry);
         if (_chatSessionId == sessionId) _chatPanel?.Append(entry);
         PersistSession();
@@ -749,11 +807,62 @@ internal abstract class ChatHostForm : BaseWindow
         if (messageId.Length == 0) return;
         var index = _outbox.FindIndex(item => item.SessionId == sessionId && item.Message.MessageId == messageId);
         if (index < 0) return;
+        var delivered = _outbox[index];
         _outbox.RemoveAt(index);
+        // Файл доставлен и проверен получателем — временная копия в outbox больше не нужна.
+        // Раньше она оставалась навсегда и копилась на диске (до 5 ГБ на файл).
+        DeleteOutboxCopy(delivered);
         MarkDelivered(sessionId, messageId);
         PersistSession();
         UpdateQueueStatus();
         _ = FlushOutboxAsync();
+    }
+
+    /// <summary>Удалить временную копию файла из outbox-кэша (только если она там).
+    /// Исходный файл пользователя никогда не трогаем.</summary>
+    private void DeleteOutboxCopy(OutgoingChatMessage item)
+    {
+        if (item.FilePath.Length == 0) return;
+        try
+        {
+            var outboxDir = Path.GetFullPath(ChatSessionStore.OutboxDirectory(OutboxProfile));
+            var file = Path.GetFullPath(item.FilePath);
+            if (file.StartsWith(outboxDir.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase))
+                File.Delete(file);
+        }
+        catch (Exception ex) { AppLog.Error("Не удалось удалить временную копию отправленного файла", ex); }
+    }
+
+    private string OutboxProfile => _persistenceProfile.Length > 0 ? _persistenceProfile : "default";
+
+    /// <summary>При запуске: удалить из outbox-кэша файлы, на которые не ссылается очередь
+    /// (остались от прежних версий, где копии после доставки не удалялись).</summary>
+    private void CleanupOrphanOutboxCopies()
+    {
+        try
+        {
+            var outboxDir = ChatSessionStore.OutboxDirectory(OutboxProfile);
+            var inUse = new HashSet<string>(
+                _outbox.Where(item => item.FilePath.Length > 0).Select(item => Path.GetFullPath(item.FilePath)),
+                StringComparer.OrdinalIgnoreCase);
+            long freed = 0;
+            var count = 0;
+            foreach (var file in Directory.EnumerateFiles(outboxDir))
+            {
+                if (inUse.Contains(Path.GetFullPath(file))) continue;
+                try
+                {
+                    var length = new FileInfo(file).Length;
+                    File.Delete(file);
+                    freed += length;
+                    count++;
+                }
+                catch { }
+            }
+            if (count > 0)
+                AppLog.Info($"Удалено старых копий отправленных файлов: {count}, освобождено {freed / (1024 * 1024)} МБ");
+        }
+        catch (Exception ex) { AppLog.Error("Не удалось очистить временные копии отправленных файлов", ex); }
     }
 
     protected void NotifyTransportChanged(bool connected)
@@ -910,6 +1019,12 @@ internal abstract class ChatHostForm : BaseWindow
         {
             _chats.Remove(sessionId);
             _sessionTitles.Remove(sessionId);
+            foreach (var item in _outbox.Where(item => item.SessionId == sessionId).ToList())
+            {
+                item.StreamGeneration++;
+                item.Streaming = false;
+                DeleteOutboxCopy(item);
+            }
             _outbox.RemoveAll(item => item.SessionId == sessionId);
         }
         if (_chatSessionId == sessionId)
@@ -966,6 +1081,7 @@ internal abstract class ChatHostForm : BaseWindow
             if (bucket.PinnedId.Length > 0) _pinnedMessages[bucket.SessionId] = bucket.PinnedId;
         }
         _outbox.AddRange(snapshot.Outbox);
+        CleanupOrphanOutboxCopies();
         RestorePendingArchived(snapshot.PendingArchivedJobs);
         RestorePendingRemoved(snapshot.PendingRemovedJobs);
     }
@@ -1038,6 +1154,41 @@ internal abstract class ChatHostForm : BaseWindow
     }
 
     internal static void PrepareForWindowsShutdown() => IsApplicationExiting = true;
+
+    private static int _sessionEnding;
+
+    /// <summary>
+    /// Выход из учётной записи Windows, перезагрузка или выключение.
+    /// Закрываем программу сразу и синхронно, пока Windows ждёт ответа на WM_QUERYENDSESSION:
+    /// сохраняем сессию, корректно рвём соединения (мастер сразу видит менеджера «не в сети»),
+    /// убираем значок из трея. Отложенный Shutdown() Windows часто не дожидается и убивает процесс.
+    /// Страховка: если что-то зависнет (модальное окно, сеть), через 4 с процесс завершается принудительно.
+    /// </summary>
+    internal static void ShutdownForSessionEnd(string reason)
+    {
+        if (Interlocked.Exchange(ref _sessionEnding, 1) != 0) return;
+        IsApplicationExiting = true;
+        AppLog.Info("Завершение сеанса Windows (" + reason + "): программа закрывается полностью");
+
+        var watchdog = new Thread(() =>
+        {
+            Thread.Sleep(4000);
+            AppLog.Info("Принудительное завершение процесса после выхода из сеанса Windows");
+            Environment.Exit(0);
+        })
+        { IsBackground = true, Name = "SessionEndWatchdog" };
+        watchdog.Start();
+
+        var app = System.Windows.Application.Current;
+        if (app is null) return;
+        foreach (var window in app.Windows.OfType<Window>().ToList())
+        {
+            if (window is not ChatHostForm and not RoleForm) continue;
+            try { window.Close(); }
+            catch (Exception ex) { AppLog.Error("Не удалось закрыть окно при выходе из сеанса", ex); }
+        }
+        app.Shutdown();
+    }
 
     protected bool TryHideToTray(System.ComponentModel.CancelEventArgs e)
     {

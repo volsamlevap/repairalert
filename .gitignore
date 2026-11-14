@@ -1,0 +1,10 @@
+# Результаты сборки .NET
+bin/
+obj/
+build/
+
+# Файлы IDE
+.vs/
+*.user
+*.suo
+build-*/

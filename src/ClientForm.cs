@@ -756,7 +756,37 @@ internal sealed class ClientForm : ChatHostForm
             }
             RebuildChips();
         };
-        panel.Children.Add(addFile);
+        // «С телефона» — QR-код: фото/видео/файлы с телефона попадают в этот же список вложений (2.40)
+        var fromPhone = Ui.ActionButton("📱 С телефона", "WhiteButton");
+        fromPhone.MinWidth = 140;
+        fromPhone.Height = 32;
+        fromPhone.MinHeight = 32;
+        fromPhone.FontSize = 12;
+        fromPhone.Margin = new Thickness(8, 0, 0, 6);
+        fromPhone.ToolTip = "Показать QR-код: отсканируйте телефоном и выберите фото, видео или файлы";
+        fromPhone.Click += (_, _) =>
+        {
+            PhoneUploadWindow.ShowFor(this, "Новая заявка (вложения)", (partPath, name) =>
+            {
+                if (attachments.Count >= 10)
+                    return Task.FromResult<string?>("К одной заявке можно прикрепить не больше 10 файлов.");
+                string saved;
+                try { saved = FileTransferService.SaveCompletedPart(partPath, name); }
+                catch (Exception ex)
+                {
+                    AppLog.Error("Не удалось сохранить файл с телефона", ex);
+                    return Task.FromResult<string?>("Не удалось сохранить файл на компьютере: " + ex.Message);
+                }
+                attachments.Add(saved);
+                RebuildChips();
+                return Task.FromResult<string?>(null);
+            });
+        };
+        var fileButtons = new StackPanel { Orientation = Orientation.Horizontal };
+        addFile.Margin = new Thickness(0, 0, 0, 6);
+        fileButtons.Children.Add(addFile);
+        fileButtons.Children.Add(fromPhone);
+        panel.Children.Add(fileButtons);
         panel.Children.Add(chips);
 
         var buttons = new Grid();
@@ -777,8 +807,11 @@ internal sealed class ClientForm : ChatHostForm
                 serialInput.Text.Trim(), urgentBox.IsChecked == true);
             if (await SendJobAsync(input.Text.Trim(), details) is not string jobId) return;
             CloseSheet();
-            foreach (var path in attachments.ToList())
-                await QueueFileMessageAsync(jobId, path);
+            // Все вложения новой заявки — одно сообщение в чате заявки
+            var files = attachments.ToList();
+            var batch = files.Count > 1 ? ChatPanel.NewBatchId() : "";
+            foreach (var path in files)
+                await QueueFileMessageAsync(jobId, path, batch);
         };
         ShowSheet(panel, 480);
         input.Focus();
@@ -1058,6 +1091,7 @@ internal sealed class ClientForm : ChatHostForm
         startHidden.Checked += (_, _) => { _settings.StartHidden = true; SettingsStore.Save(_settings); };
         startHidden.Unchecked += (_, _) => { _settings.StartHidden = false; SettingsStore.Save(_settings); };
         panel.Children.Add(startHidden);
+        panel.Children.Add(SettingsUi.CloseOnSessionSwitchCheckBox(_settings, new Thickness(0, 0, 0, 8)));
         panel.Children.Add(Ui.SectionTitle("Тихие часы"));
         panel.Children.Add(Ui.Note("В это время звуковые сигналы выключены, визуальные уведомления остаются. Оставьте поля пустыми, чтобы выключить режим."));
         var quietRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };

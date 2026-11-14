@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn>CS8602;CS8604;CS8618</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/MobileUpload.cs" Link="MobileUpload.cs" />
+    <Compile Include="../../src/MobileUploadPage.cs" Link="MobileUploadPage.cs" />
+    <Compile Include="../../src/FileAndReportServices.cs" Link="FileAndReportServices.cs" />
+    <Compile Include="../../src/StoragePaths.cs" Link="StoragePaths.cs" />
+    <Compile Include="../../src/IncomingTransfers.cs" Link="IncomingTransfers.cs" />
+    <Compile Include="../../src/AtomicFileStore.cs" Link="AtomicFileStore.cs" />
+    <Compile Include="../../src/LanDiscovery.cs" Link="LanDiscovery.cs" />
+    <Compile Include="../../src/SecurityService.cs" Link="SecurityService.cs" />
+    <Compile Include="../../src/Protocol.cs" Link="Protocol.cs" />
+    <Compile Include="../../src/JobTiming.cs" Link="JobTiming.cs" />
+  </ItemGroup>
+</Project>

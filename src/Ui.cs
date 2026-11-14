@@ -245,6 +245,14 @@ internal static class Ui
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <Style.Triggers>
+                <!-- Многострочные поля (текст прижат к верху): отступ сверху и снизу,
+                     чтобы курсор не упирался в рамку, — визуально как отступ слева.
+                     Поля со своим Padding (ввод сообщения в чате) это не затрагивает -->
+                <Trigger Property="AcceptsReturn" Value="True">
+                    <Setter Property="Padding" Value="12,10,12,10"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
         """.Replace("%X%", X);
 

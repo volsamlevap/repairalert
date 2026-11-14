@@ -6,6 +6,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Отдельный тест загрузки с телефона — свой проект в подпапке, сюда его файлы не берём -->
+    <Compile Remove="MobileUploadTests/**" />
+    <None Remove="MobileUploadTests/**" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="../src/Protocol.cs" Link="Protocol.cs" />
     <Compile Include="../src/EnterSend.cs" Link="EnterSend.cs" />
     <Compile Include="../src/PeerConnection.cs" Link="PeerConnection.cs" />

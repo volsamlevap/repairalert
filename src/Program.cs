@@ -17,13 +17,20 @@ internal static class Program
             SingleInstance.SignalExisting();
             return;
         }
+        // Временные части загрузок с телефона от прошлого запуска (сессии живут только в памяти).
+        // Только после проверки единственного экземпляра — иначе можно стереть загрузку работающей копии.
+        MobileUploadService.CleanupAtStartup();
+        Microsoft.Win32.SessionSwitchEventHandler? onSessionSwitch = null;
         try
         {
             var settings = SettingsStore.Load();
             Ui.ApplyTheme(settings.Theme);
             var app = new System.Windows.Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
             Ui.ApplyResources(app);
-            app.SessionEnding += (_, _) => ChatHostForm.PrepareForWindowsShutdown();
+            // Выход из учётной записи / перезагрузка / выключение: программа закрывается полностью,
+            // а не прячется в трей
+            app.SessionEnding += (_, e) => ChatHostForm.ShutdownForSessionEnd(
+                e.ReasonSessionEnding == ReasonSessionEnding.Logoff ? "выход из учётной записи" : "выключение или перезагрузка");
             app.DispatcherUnhandledException += (_, e) =>
             {
                 AppLog.Error("Ошибка интерфейса", e.Exception);
@@ -50,13 +57,31 @@ internal static class Program
             if (autoStarted && settings.StartHidden && startupWindow is ChatHostForm host)
                 host.Loaded += (_, _) => host.HideToTrayOnStartup();
             SingleInstance.StartWakeListener(() => app.Dispatcher.BeginInvoke(WakeWindows));
+            // «Сменить пользователя» (и отключение RDP): сеанс остаётся в фоне. Если включена
+            // галочка «Полностью закрываться при смене пользователя…» (по умолчанию да), закрываем
+            // программу так же, как при выходе. Простая блокировка экрана (Win+L) не закрывает.
+            onSessionSwitch = (_, e) =>
+            {
+                if (e.Reason is not (Microsoft.Win32.SessionSwitchReason.ConsoleDisconnect
+                    or Microsoft.Win32.SessionSwitchReason.RemoteDisconnect)) return;
+                if (!SettingsStore.Load().CloseOnSessionSwitch)
+                {
+                    AppLog.Info("Смена пользователя Windows: программа продолжает работать в фоне (так выбрано в настройках)");
+                    return;
+                }
+                app.Dispatcher.InvokeAsync(() => ChatHostForm.ShutdownForSessionEnd("смена пользователя Windows"));
+            };
+            Microsoft.Win32.SystemEvents.SessionSwitch += onSessionSwitch;
             app.Run(startupWindow);
         }
         finally
         {
+            if (onSessionSwitch is not null) Microsoft.Win32.SystemEvents.SessionSwitch -= onSessionSwitch;
             SingleInstance.Release();
             AppLog.Info("Приложение завершено");
         }
+        // Гарантированное завершение процесса: никакие оставшиеся потоки не держат его в памяти
+        Environment.Exit(0);
     }
 
     private static void WakeWindows()

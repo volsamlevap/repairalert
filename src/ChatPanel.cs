@@ -7,9 +7,11 @@ using System.Windows.Threading;
 
 namespace RepairAlert;
 
+/// <param name="Batch">Номер «пачки» файлов, отправленных за раз (2.40): такие файлы в чате
+/// показываются одним сообщением со списком. Пусто — обычное отдельное сообщение.</param>
 internal sealed record ChatEntry(string Sender, string Text, DateTime Time, bool Own,
     string FileName = "", string FilePath = "", long FileSize = 0,
-    string Id = "", string Delivery = "");
+    string Id = "", string Delivery = "", string Batch = "");
 
 internal sealed class ChatPanel : UserControl
 {
@@ -17,6 +19,7 @@ internal sealed class ChatPanel : UserControl
     private readonly StackPanel _history;
     private readonly TextBox _input;
     private readonly Button _attachButton;
+    private readonly Button _phoneButton;
     private readonly Button _sendButton;
     private readonly TextBlock _queueStatus;
     private readonly Button _cancelFilesButton;
@@ -46,7 +49,8 @@ internal sealed class ChatPanel : UserControl
     private const string DefaultEmptyHint = "Сообщений пока нет — напишите первым";
 
     public event Action<string, string>? MessageSend;
-    public event Action<string, string>? FileSend;
+    /// <summary>Отправить файл: сессия, путь, номер пачки (пусто — одиночный файл).</summary>
+    public event Action<string, string, string>? FileSend;
     public event Action<string>? CancelFiles;
     public event Action<string, string>? MessageDeleteRequested;
     public event Action? Read;
@@ -55,6 +59,8 @@ internal sealed class ChatPanel : UserControl
     public event Action<string, string, string>? MessageEditRequested;
     /// <summary>Пользователь выбрал «Закрепить»/«Открепить»: сессия, сообщение.</summary>
     public event Action<string, string>? PinToggled;
+    /// <summary>Нажата кнопка «Загрузить с телефона» (QR-код) для текущего чата.</summary>
+    public event Action<string>? PhoneUploadRequested;
 
     public string SessionId => _sessionId;
 
@@ -208,7 +214,51 @@ internal sealed class ChatPanel : UserControl
         attachTemplate.Triggers.Add(attachHover);
         _attachButton.Template = attachTemplate;
         _attachButton.Click += (_, _) => ChooseFiles();
-        composerGrid.Children.Add(_attachButton);
+
+        // Кнопка «Загрузить с телефона» — рядом со скрепкой, в том же стиле (2.40)
+        _phoneButton = new Button
+        {
+            Width = 34,
+            Height = 34,
+            MinWidth = 34,
+            MinHeight = 34,
+            Padding = new Thickness(0),
+            Margin = new Thickness(6, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Cursor = Cursors.Hand,
+            Background = Ui.Accent,
+            ToolTip = "Загрузить с телефона по QR-коду (фото, видео, файлы до 5 ГБ)"
+        };
+        System.Windows.Automation.AutomationProperties.SetName(_phoneButton, "Загрузить с телефона");
+        var phoneTemplate = new ControlTemplate(typeof(Button));
+        var phoneChrome = new FrameworkElementFactory(typeof(Border));
+        phoneChrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(17));
+        phoneChrome.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
+        var phoneGlyph = new FrameworkElementFactory(typeof(TextBlock));
+        phoneGlyph.SetValue(TextBlock.TextProperty, ""); // CellPhone
+        phoneGlyph.SetValue(TextBlock.FontFamilyProperty, new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"));
+        phoneGlyph.SetValue(TextBlock.FontSizeProperty, 16.0);
+        phoneGlyph.SetValue(TextBlock.ForegroundProperty, Brushes.White);
+        phoneGlyph.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        phoneGlyph.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
+        phoneChrome.AppendChild(phoneGlyph);
+        phoneTemplate.VisualTree = phoneChrome;
+        var phoneHover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
+        phoneHover.Setters.Add(new Setter(UIElement.OpacityProperty, 0.85));
+        phoneTemplate.Triggers.Add(phoneHover);
+        var phoneDisabled = new Trigger { Property = UIElement.IsEnabledProperty, Value = false };
+        phoneDisabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.4));
+        phoneTemplate.Triggers.Add(phoneDisabled);
+        _phoneButton.Template = phoneTemplate;
+        _phoneButton.Click += (_, _) =>
+        {
+            if (_sessionId.Length > 0) PhoneUploadRequested?.Invoke(_sessionId);
+        };
+
+        var leftButtons = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        leftButtons.Children.Add(_attachButton);
+        leftButtons.Children.Add(_phoneButton);
+        composerGrid.Children.Add(leftButtons);
         _input = new TextBox
         {
             MinHeight = 36,
@@ -388,6 +438,8 @@ internal sealed class ChatPanel : UserControl
         _unreadIncoming.Clear();
         _textBodies.Clear();
         _bubblesById.Clear();
+        _albumRows.Clear();
+        _albumPathSetters.Clear();
         CancelEdit();
         SetPinned("", "");
         UpdateEmptyHint();
@@ -414,8 +466,275 @@ internal sealed class ChatPanel : UserControl
         });
     }
 
+    // ---- Несколько файлов, отправленных за раз, — одно сообщение со списком (2.40) ----
+
+    private sealed class AlbumInfo
+    {
+        public required string Batch { get; init; }
+        public required bool Own { get; init; }
+        public required string Sender { get; init; }
+        public required DateTime Time { get; init; }
+        public required StackPanel Items { get; init; }
+        public required TextBlock Header { get; init; }
+    }
+
+    private readonly Dictionary<string, (Border Bubble, FrameworkElement Row)> _albumRows = new();
+    private readonly Dictionary<string, Action<string>> _albumPathSetters = new();
+
+    private static string FilesWord(int count) =>
+        count % 10 == 1 && count % 100 != 11 ? "файл"
+        : count % 10 is >= 2 and <= 4 && (count % 100 < 10 || count % 100 >= 20) ? "файла"
+        : "файлов";
+
+    private static void UpdateAlbumHeader(AlbumInfo album) =>
+        album.Header.Text = $"{album.Sender}  ·  {album.Time:dd.MM.yyyy HH:mm}  ·  " +
+                            $"{album.Items.Children.Count} {FilesWord(album.Items.Children.Count)}";
+
+    private void AppendToAlbum(ChatEntry entry)
+    {
+        var sender = entry.Own ? "Вы" : entry.Sender;
+        Border bubble;
+        AlbumInfo album;
+        var lastIndex = _history.Children.Count - 1;
+        if (lastIndex >= 0 && _history.Children[lastIndex] is Border { Tag: AlbumInfo last } lastBubble &&
+            last.Batch == entry.Batch && last.Own == entry.Own && last.Sender == sender)
+        {
+            bubble = lastBubble;
+            album = last;
+        }
+        else
+        {
+            bubble = new Border
+            {
+                Background = entry.Own ? Ui.Accent : Ui.FillSubtle,
+                CornerRadius = entry.Own ? new CornerRadius(18, 18, 6, 18) : new CornerRadius(18, 18, 18, 6),
+                Padding = new Thickness(12, 9, 12, 9),
+                Margin = new Thickness(entry.Own ? 56 : 2, 4, entry.Own ? 2 : 56, 4),
+                HorizontalAlignment = entry.Own ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+                MinWidth = 260,
+                MaxWidth = 560
+            };
+            var content = new StackPanel();
+            var header = new TextBlock
+            {
+                Foreground = entry.Own ? OnAccentMuted : Ui.Muted,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 4)
+            };
+            content.Children.Add(header);
+            var items = new StackPanel();
+            content.Children.Add(items);
+            bubble.Child = content;
+            album = new AlbumInfo
+            {
+                Batch = entry.Batch, Own = entry.Own, Sender = sender, Time = entry.Time,
+                Items = items, Header = header
+            };
+            bubble.Tag = album;
+            _history.Children.Add(bubble);
+        }
+        var row = BuildAlbumRow(entry);
+        album.Items.Children.Add(row);
+        UpdateAlbumHeader(album);
+        if (entry.Id.Length > 0)
+        {
+            _albumRows[entry.Id] = (bubble, row);
+            _bubblesById[entry.Id] = bubble;
+        }
+        if (!entry.Own && entry.Id.Length > 0)
+        {
+            _unreadIncoming.Add(entry.Id);
+            ScheduleReadReceipt();
+        }
+        UpdateEmptyHint();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => _scroll.ScrollToEnd());
+    }
+
+    /// <summary>Строка файла внутри общего сообщения: миниатюра/расширение, имя, размер,
+    /// своя строка состояния и полоска прогресса (обновляются так же, как у одиночного файла).</summary>
+    private FrameworkElement BuildAlbumRow(ChatEntry entry)
+    {
+        var onAccent = entry.Own;
+        var row = new Grid { Margin = new Thickness(0, 4, 0, 4), Background = Brushes.Transparent };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // Плитка: миниатюра для картинок, иначе расширение файла
+        var extension = Path.GetExtension(entry.FileName).TrimStart('.').ToUpperInvariant();
+        if (extension.Length > 5) extension = extension[..5];
+        var tile = new Border
+        {
+            Width = 44,
+            Height = 44,
+            CornerRadius = new CornerRadius(8),
+            Background = new SolidColorBrush(onAccent ? Color.FromArgb(56, 255, 255, 255)
+                : Ui.IsDarkTheme ? Color.FromArgb(40, 255, 255, 255) : Color.FromArgb(18, 0, 0, 0)),
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = new TextBlock
+            {
+                Text = extension.Length > 0 ? extension : "ФАЙЛ",
+                FontSize = 10,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = onAccent ? Brushes.White : Ui.Muted,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+        row.Children.Add(tile);
+
+        var info = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        var nameLine = new DockPanel { LastChildFill = true };
+        var size = new TextBlock
+        {
+            Text = FormatSize(entry.FileSize),
+            FontSize = 11,
+            Foreground = onAccent ? OnAccentMuted : Ui.Muted,
+            Margin = new Thickness(8, 1, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        DockPanel.SetDock(size, Dock.Right);
+        nameLine.Children.Add(size);
+        nameLine.Children.Add(new TextBlock
+        {
+            Text = entry.FileName,
+            FontSize = 13,
+            Foreground = onAccent ? Brushes.White : Ui.Ink,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            ToolTip = entry.FileName
+        });
+        info.Children.Add(nameLine);
+
+        var done = entry.Delivery is "✓" or "✓✓" || (entry.FilePath.Length > 0 && entry.Delivery != "receiving");
+        var status = new TextBlock
+        {
+            Text = done
+                ? (entry.Own ? (entry.Delivery == "✓✓" ? "✓✓ Прочитано" : "✓ Доставлено") : "✓ Файл получен")
+                : (entry.Own
+                    ? (entry.Delivery.StartsWith("Ошибка", StringComparison.Ordinal) ? entry.Delivery : "○ В очереди")
+                    : "Ожидание начала передачи…"),
+            Foreground = entry.Own ? OnAccentMuted
+                : done ? Ui.Green
+                : entry.Delivery.StartsWith("Ошибка", StringComparison.Ordinal) ? Ui.Danger : Ui.Muted,
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0)
+        };
+        info.Children.Add(status);
+        var bar = new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Height = 3,
+            Margin = new Thickness(0, 4, 0, 0),
+            Foreground = entry.Own ? Brushes.White : Ui.Accent,
+            Visibility = done ? Visibility.Collapsed : Visibility.Visible
+        };
+        info.Children.Add(bar);
+        Grid.SetColumn(info, 1);
+        row.Children.Add(info);
+
+        if (entry.Own && entry.Id.Length > 0 && entry.Delivery is not ("✓" or "✓✓"))
+        {
+            var id = entry.Id;
+            var deleteMark = new TextBlock
+            {
+                Text = "✕",
+                Foreground = OnAccentMuted,
+                FontSize = 11,
+                Cursor = Cursors.Hand,
+                ToolTip = "Удалить из очереди",
+                Margin = new Thickness(8, 2, 0, 0),
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            deleteMark.MouseLeftButtonDown += (_, e) =>
+            {
+                e.Handled = true;
+                MessageDeleteRequested?.Invoke(_sessionId, id);
+            };
+            // иначе отпускание кнопки дойдёт до строки и откроет файл
+            deleteMark.MouseLeftButtonUp += (_, e) => e.Handled = true;
+            Grid.SetColumn(deleteMark, 2);
+            row.Children.Add(deleteMark);
+            _deleteMarks[id] = deleteMark;
+        }
+
+        // Открыть файл щелчком по строке; путь у входящего появляется после получения
+        string? openPath = null;
+        void SetPath(string path)
+        {
+            openPath = path;
+            row.Cursor = Cursors.Hand;
+            row.ToolTip = File.Exists(path) ? "Открыть файл" : "Открыть папку с файлами";
+            var thumbnail = CreateThumbnailBrush(path);
+            if (thumbnail is not null)
+            {
+                tile.Child = null;
+                tile.Background = thumbnail;
+            }
+        }
+        if (entry.FilePath.Length > 0) SetPath(entry.FilePath);
+        row.MouseLeftButtonUp += (_, e) =>
+        {
+            if (openPath is null) return;
+            e.Handled = true;
+            try
+            {
+                if (File.Exists(openPath))
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(openPath) { UseShellExecute = true });
+                else FileTransferService.OpenReceivedDirectory();
+            }
+            catch { }
+        };
+        row.PreviewMouseRightButtonUp += (_, e) =>
+        {
+            e.Handled = true;
+            ShowBubbleMenu(row, entry);
+        };
+
+        if (entry.Id.Length > 0)
+        {
+            _albumPathSetters[entry.Id] = SetPath;
+            _fileProgressLabels[entry.Id] = status;
+            _fileProgressBars[entry.Id] = bar;
+            if (entry.Own)
+            {
+                _deliveryLabels[entry.Id] = status;
+                _ownAccentLabels.Add(entry.Id);
+            }
+        }
+        return row;
+    }
+
+    private static ImageBrush? CreateThumbnailBrush(string path)
+    {
+        if (!IsImageFile(path) || !File.Exists(path)) return null;
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.DecodePixelWidth = 96;
+            bitmap.UriSource = new Uri(path, UriKind.Absolute);
+            bitmap.EndInit();
+            bitmap.Freeze();
+            var brush = new ImageBrush(bitmap) { Stretch = Stretch.UniformToFill };
+            brush.Freeze();
+            return brush;
+        }
+        catch { return null; }
+    }
+
     public void Append(ChatEntry entry)
     {
+        if (entry.FileName.Length > 0 && entry.Batch.Length > 0)
+        {
+            AppendToAlbum(entry);
+            return;
+        }
         var bubble = new Border
         {
             Background = entry.Own ? Ui.Accent : Ui.FillSubtle,
@@ -751,6 +1070,12 @@ internal sealed class ChatPanel : UserControl
 
     public void ShowThumbnail(string id, string path)
     {
+        // Файл в общем сообщении: строка получает путь (открытие по щелчку) и миниатюру
+        if (_albumPathSetters.TryGetValue(id, out var setPath))
+        {
+            setPath(path);
+            return;
+        }
         if (_thumbnailsShown.Contains(id)) return;
         if (!_fileContentPanels.TryGetValue(id, out var content)) return;
         var thumbnail = CreateThumbnail(path);
@@ -825,7 +1150,7 @@ internal sealed class ChatPanel : UserControl
                 if (image is not null)
                 {
                     var path = SaveClipboardImage(image);
-                    if (path is not null) FileSend?.Invoke(_sessionId, path);
+                    if (path is not null) FileSend?.Invoke(_sessionId, path, "");
                 }
                 e.Handled = true;
                 return;
@@ -879,10 +1204,21 @@ internal sealed class ChatPanel : UserControl
         _cancelFilesButton.Visibility = fileCount > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    public static string NewBatchId() => Guid.NewGuid().ToString("N")[..12];
+
     public void RemoveMessages(IEnumerable<string> messageIds)
     {
         foreach (var id in messageIds)
         {
+            // Файл из общего сообщения: убираем только его строку; пустое сообщение — целиком
+            if (_albumRows.Remove(id, out var albumRow) && albumRow.Bubble.Tag is AlbumInfo album)
+            {
+                album.Items.Children.Remove(albumRow.Row);
+                if (album.Items.Children.Count == 0) _history.Children.Remove(albumRow.Bubble);
+                else UpdateAlbumHeader(album);
+                _albumPathSetters.Remove(id);
+                _bubblesById.Remove(id);
+            }
             if (_messageBubbles.Remove(id, out var bubble)) _history.Children.Remove(bubble);
             _deliveryLabels.Remove(id);
             _fileProgressLabels.Remove(id);
@@ -927,6 +1263,7 @@ internal sealed class ChatPanel : UserControl
         var files = paths.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var folders = paths.Count(path => !File.Exists(path) && Directory.Exists(path));
         var tooLarge = new List<string>();
+        var accepted = new List<string>();
         foreach (var path in files)
         {
             var info = new FileInfo(path);
@@ -935,8 +1272,11 @@ internal sealed class ChatPanel : UserControl
                 tooLarge.Add($"{info.Name} ({FormatSize(info.Length)})");
                 continue;
             }
-            FileSend?.Invoke(_sessionId, path);
+            accepted.Add(path);
         }
+        // Несколько файлов за раз — одна «пачка»: в чате одно сообщение со списком файлов
+        var batch = accepted.Count > 1 ? NewBatchId() : "";
+        foreach (var path in accepted) FileSend?.Invoke(_sessionId, path, batch);
         var owner = Window.GetWindow(this);
         if (tooLarge.Count > 0)
         {
@@ -958,6 +1298,7 @@ internal sealed class ChatPanel : UserControl
         _input.IsEnabled = enabled;
         _sendButton.IsEnabled = enabled;
         _attachButton.IsEnabled = enabled;
+        _phoneButton.IsEnabled = enabled;
     }
 
     /// <summary>Меняет подсказку в пустой истории (например, когда заявки нет).</summary>

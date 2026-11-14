@@ -312,11 +312,13 @@ internal sealed class RoleForm : BaseWindow
             Content = "При автозапуске открываться только в трее",
             IsChecked = _settings.StartHidden,
             Foreground = Ui.Muted,
-            FontSize = 12
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 0, 6)
         };
         startHidden.Checked += (_, _) => { _settings.StartHidden = true; SettingsStore.Save(_settings); };
         startHidden.Unchecked += (_, _) => { _settings.StartHidden = false; SettingsStore.Save(_settings); };
         panel.Children.Add(startHidden);
+        panel.Children.Add(SettingsUi.CloseOnSessionSwitchCheckBox(_settings, new Thickness(0)));
         return panel;
     }
 
