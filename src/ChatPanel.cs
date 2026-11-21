@@ -204,9 +204,13 @@ internal sealed class ChatPanel : UserControl
         attachChrome.SetValue(Border.BackgroundProperty,
             new TemplateBindingExtension(Control.BackgroundProperty));
         // Векторная скрепка (MDI, сплошная заливка) — в едином стиле с QR и «самолётиком»
+        // Векторная скрепка с округлыми концами линий — в едином стиле с QR и «самолётиком»
         var clipIcon = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
         clipIcon.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse(IconPaperclip));
-        clipIcon.SetValue(System.Windows.Shapes.Path.FillProperty, Brushes.White);
+        clipIcon.SetValue(System.Windows.Shapes.Path.StrokeProperty, Brushes.White);
+        clipIcon.SetValue(System.Windows.Shapes.Path.StrokeThicknessProperty, 1.9);
+        clipIcon.SetValue(System.Windows.Shapes.Path.StrokeStartLineCapProperty, PenLineCap.Round);
+        clipIcon.SetValue(System.Windows.Shapes.Path.StrokeEndLineCapProperty, PenLineCap.Round);
         clipIcon.SetValue(FrameworkElement.WidthProperty, 16.0);
         clipIcon.SetValue(FrameworkElement.HeightProperty, 16.0);
         clipIcon.SetValue(System.Windows.Shapes.Path.StretchProperty, Stretch.Uniform);
@@ -1005,11 +1009,11 @@ internal sealed class ChatPanel : UserControl
     private const string IconFolder = "M10,4H4C2.9,4 2.01,4.9 2.01,6L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2-0.9 2-2V8c0-1.1-0.9-2-2-2h-8l-2-2z";
     private const string IconDelete = "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2-0.9 2-2V7H6v12zM19,4h-3.5l-1-1h-5l-1,1H5v2h14V4z";
     private const string IconSend = "M2,21L23,12 2,3v7l15,2-15,2v7z";
-    // MDI paperclip (Material Design Icons, Apache 2.0) — сплошная заливка, в едином стиле
+    // Скрепка-контур с округлыми концами линий (вариант, утверждённый пользователем) —
+    // рисуется обводкой, а не заливкой, см. шаблон кнопки вложения
     private const string IconPaperclip =
-        "M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5" +
-        "V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5" +
-        "V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z";
+        "M21.44,11.05 L12.25,20.24 a6,6 0 0 1 -8.49,-8.49 L12.95,2.56 a4,4 0 1 1 5.66,5.66 " +
+        "L9.41,17.41 a2,2 0 0 1 -2.83,-2.83 L15.07,6.1";
 
     /// <summary>Пункт меню с векторной иконкой: цвета берутся из текущей темы оформления.</summary>
     private static MenuItem BuildMenuItem(string text, string iconGeometry, Brush? color = null)
