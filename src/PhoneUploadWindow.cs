@@ -19,6 +19,9 @@ internal sealed class PhoneUploadWindow : BaseWindow
     private readonly ComboBox _addressBox;
     private readonly TextBlock _statusText;
     private readonly TextBlock _hintText;
+    private readonly Border _firewallBar;
+    private readonly TextBlock _firewallText;
+    private readonly Button _firewallButton;
     private readonly ProgressBar _progress;
     private readonly Button _closeButton;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -131,6 +134,33 @@ internal sealed class PhoneUploadWindow : BaseWindow
         };
         root.Children.Add(_urlBox);
 
+        // Предупреждение о брандмауэре: показывается, только если правила нет (проверка ниже)
+        _firewallText = new TextBlock
+        {
+            Text = "Windows может блокировать приём файлов с телефона. Если страница на телефоне " +
+                   "не открывается — разрешите порт в брандмауэре (один раз, понадобится подтверждение администратора).",
+            FontSize = 12,
+            Foreground = Ui.Ink,
+            TextWrapping = TextWrapping.Wrap
+        };
+        _firewallButton = Ui.ActionButton("Разрешить в брандмауэре", "WhiteButton");
+        _firewallButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _firewallButton.Margin = new Thickness(0, 6, 0, 0);
+        _firewallButton.Click += OnFirewallClick;
+        var firewallStack = new StackPanel();
+        firewallStack.Children.Add(_firewallText);
+        firewallStack.Children.Add(_firewallButton);
+        _firewallBar = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(31, 255, 159, 10)),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(10, 8, 10, 8),
+            Margin = new Thickness(0, 0, 0, 8),
+            Visibility = Visibility.Collapsed,
+            Child = firewallStack
+        };
+        root.Children.Add(_firewallBar);
+
         _statusText = new TextBlock
         {
             FontSize = 14,
@@ -152,6 +182,7 @@ internal sealed class PhoneUploadWindow : BaseWindow
 
         UpdateQr();
         UpdateStatus();
+        CheckFirewallRule();
         _session.Changed += OnSessionChanged;
         _timer.Tick += (_, _) => UpdateStatus();
         _timer.Start();
@@ -254,6 +285,42 @@ internal sealed class PhoneUploadWindow : BaseWindow
         {
             _hintText.Visibility = Visibility.Collapsed;
         }
+    }
+
+    /// <summary>Проверить правило брандмауэра в фоне (netsh может занять долю секунды).
+    /// Правила нет — показываем плашку с кнопкой; проверить не удалось — не мешаем работе.</summary>
+    private void CheckFirewallRule()
+    {
+        Task.Run(() =>
+        {
+            var exists = FirewallService.RuleExists(MobileUploadService.Port);
+            if (exists != false) return;
+            Dispatcher.BeginInvoke(() => _firewallBar.Visibility = Visibility.Visible);
+        });
+    }
+
+    private void OnFirewallClick(object sender, RoutedEventArgs e)
+    {
+        _firewallButton.IsEnabled = false;
+        _firewallButton.Content = "Настраиваем…";
+        Task.Run(() =>
+        {
+            var error = FirewallService.EnsureRule(MobileUploadService.Port);
+            Dispatcher.BeginInvoke(() =>
+            {
+                _firewallButton.IsEnabled = true;
+                _firewallButton.Content = "Разрешить в брандмауэре";
+                if (error is null)
+                {
+                    _firewallBar.Visibility = Visibility.Collapsed;
+                    AppLog.Info("Создано правило брандмауэра для приёма файлов с телефона");
+                }
+                else
+                {
+                    _firewallText.Text = error;
+                }
+            });
+        });
     }
 
     private void OnClosingWindow(object? sender, System.ComponentModel.CancelEventArgs e)

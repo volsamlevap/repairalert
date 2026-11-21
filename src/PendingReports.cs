@@ -16,6 +16,7 @@ internal sealed class PendingReport
     public string Device { get; set; } = "";
     public string Serial { get; set; } = "";
     public bool Urgent { get; set; }
+    public string Password { get; set; } = "";
     public bool NotifyMasterCompleted { get; set; }
 }
 
@@ -64,7 +65,7 @@ internal static class ReportFlushService
             {
                 var path = ReportService.SaveReport(report.JobText, report.StartedAt, report.CompletedAt,
                     report.History, report.ManagerUser, report.MachineName, report.JobId, report.Comment,
-                    new JobDetails(report.Client, report.Device, report.Serial, report.Urgent));
+                    new JobDetails(report.Client, report.Device, report.Serial, report.Urgent, report.Password));
                 onSaved(report, path);
             }
             catch (Exception ex)

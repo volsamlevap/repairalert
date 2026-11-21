@@ -22,6 +22,7 @@ internal sealed class ChatPanel : UserControl
     private readonly Button _phoneButton;
     private readonly Button _sendButton;
     private readonly TextBlock _queueStatus;
+    private readonly Grid _queuePanel;
     private readonly Button _cancelFilesButton;
     private readonly Border _dropOverlay;
     private readonly Border _emptyHint;
@@ -61,6 +62,8 @@ internal sealed class ChatPanel : UserControl
     public event Action<string, string>? PinToggled;
     /// <summary>Нажата кнопка «Загрузить с телефона» (QR-код) для текущего чата.</summary>
     public event Action<string>? PhoneUploadRequested;
+    /// <summary>Удалить сообщение только из локальной истории (у собеседника остаётся).</summary>
+    public event Action<string, string>? LocalMessageDeleteRequested;
 
     public string SessionId => _sessionId;
 
@@ -126,18 +129,20 @@ internal sealed class ChatPanel : UserControl
         Grid.SetRow(_editBar, 3);
         _root.Children.Add(_editBar);
 
-        var queuePanel = new Grid { Margin = new Thickness(22, 8, 14, 4) };
-        queuePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        queuePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        // Полоса статуса очереди видна только когда в ней есть смысл (см. SetPendingCount):
+        // спокойное состояние «все сообщения доставлены» места на экране не занимает (2.41)
+        _queuePanel = new Grid { Margin = new Thickness(22, 8, 14, 4), Visibility = Visibility.Collapsed };
+        _queuePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        _queuePanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _queueStatus = new TextBlock
         {
-            Text = "● Все сообщения доставлены",
-            Foreground = Ui.Green,
+            Text = "● В очереди",
+            Foreground = Ui.Accent,
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap
         };
-        queuePanel.Children.Add(_queueStatus);
+        _queuePanel.Children.Add(_queueStatus);
         _cancelFilesButton = Ui.ActionButton("Остановить файлы", "DangerButton");
         _cancelFilesButton.Height = 28;
         _cancelFilesButton.MinHeight = 28;
@@ -147,9 +152,9 @@ internal sealed class ChatPanel : UserControl
         _cancelFilesButton.Visibility = Visibility.Collapsed;
         _cancelFilesButton.Click += (_, _) => CancelFiles?.Invoke(_sessionId);
         Grid.SetColumn(_cancelFilesButton, 1);
-        queuePanel.Children.Add(_cancelFilesButton);
-        Grid.SetRow(queuePanel, 0);
-        _root.Children.Add(queuePanel);
+        _queuePanel.Children.Add(_cancelFilesButton);
+        Grid.SetRow(_queuePanel, 0);
+        _root.Children.Add(_queuePanel);
 
         var historyBorder = new Border
         {
@@ -198,13 +203,13 @@ internal sealed class ChatPanel : UserControl
         attachChrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(17));
         attachChrome.SetValue(Border.BackgroundProperty,
             new TemplateBindingExtension(Control.BackgroundProperty));
-        var clipIcon = new FrameworkElementFactory(typeof(Border));
-        clipIcon.SetValue(FrameworkElement.WidthProperty, 17.0);
-        clipIcon.SetValue(FrameworkElement.HeightProperty, 17.0);
-        clipIcon.SetValue(Border.BackgroundProperty, Brushes.White);
-        clipIcon.SetValue(Border.OpacityMaskProperty, new ImageBrush(
-            new BitmapImage(new Uri("pack://application:,,,/assets/paperclip.png", UriKind.Absolute)))
-        { Stretch = Stretch.Uniform });
+        // Векторная скрепка (MDI, сплошная заливка) — в едином стиле с QR и «самолётиком»
+        var clipIcon = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
+        clipIcon.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse(IconPaperclip));
+        clipIcon.SetValue(System.Windows.Shapes.Path.FillProperty, Brushes.White);
+        clipIcon.SetValue(FrameworkElement.WidthProperty, 16.0);
+        clipIcon.SetValue(FrameworkElement.HeightProperty, 16.0);
+        clipIcon.SetValue(System.Windows.Shapes.Path.StretchProperty, Stretch.Uniform);
         clipIcon.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
         clipIcon.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
         attachChrome.AppendChild(clipIcon);
@@ -234,14 +239,8 @@ internal sealed class ChatPanel : UserControl
         var phoneChrome = new FrameworkElementFactory(typeof(Border));
         phoneChrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(17));
         phoneChrome.SetValue(Border.BackgroundProperty, new TemplateBindingExtension(Control.BackgroundProperty));
-        var phoneGlyph = new FrameworkElementFactory(typeof(TextBlock));
-        phoneGlyph.SetValue(TextBlock.TextProperty, ""); // CellPhone
-        phoneGlyph.SetValue(TextBlock.FontFamilyProperty, new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"));
-        phoneGlyph.SetValue(TextBlock.FontSizeProperty, 16.0);
-        phoneGlyph.SetValue(TextBlock.ForegroundProperty, Brushes.White);
-        phoneGlyph.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        phoneGlyph.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
-        phoneChrome.AppendChild(phoneGlyph);
+        // Иконка QR-кода — общая (Ui.QrIcon), та же у кнопки «С телефона» в форме заявки
+        phoneChrome.AppendChild(new FrameworkElementFactory(typeof(ContentPresenter)));
         phoneTemplate.VisualTree = phoneChrome;
         var phoneHover = new Trigger { Property = UIElement.IsMouseOverProperty, Value = true };
         phoneHover.Setters.Add(new Setter(UIElement.OpacityProperty, 0.85));
@@ -250,6 +249,11 @@ internal sealed class ChatPanel : UserControl
         phoneDisabled.Setters.Add(new Setter(UIElement.OpacityProperty, 0.4));
         phoneTemplate.Triggers.Add(phoneDisabled);
         _phoneButton.Template = phoneTemplate;
+        // Иконка QR-кода — общая (Ui.QrIcon), та же у кнопки «С телефона» в форме заявки
+        _phoneButton.Foreground = Brushes.White;
+        _phoneButton.Content = Ui.QrIcon(Brushes.White);
+        _phoneButton.HorizontalContentAlignment = HorizontalAlignment.Center;
+        _phoneButton.VerticalContentAlignment = VerticalAlignment.Center;
         _phoneButton.Click += (_, _) =>
         {
             if (_sessionId.Length > 0) PhoneUploadRequested?.Invoke(_sessionId);
@@ -271,6 +275,10 @@ internal sealed class ChatPanel : UserControl
             // Свой узкий отступ: глобальный стиль TextBox даёт 12px и курсор «уезжает» вправо
             Padding = new Thickness(4, 0, 4, 0),
             Background = Brushes.Transparent,
+            // Цвета заданы явно, а не через глобальный стиль: поле обязано оставаться
+            // в палитре темы при любом состоянии (2.41 — «белое поле ввода» в тёмной теме)
+            Foreground = Ui.Ink,
+            CaretBrush = Ui.Ink,
             BorderThickness = new Thickness(0),
             Margin = new Thickness(6, 1, 6, 1),
             FontSize = 14
@@ -296,13 +304,21 @@ internal sealed class ChatPanel : UserControl
         sendChrome.SetValue(Border.CornerRadiusProperty, new CornerRadius(17));
         sendChrome.SetValue(Border.BackgroundProperty,
             new TemplateBindingExtension(Control.BackgroundProperty));
-        var sendArrow = new FrameworkElementFactory(typeof(TextBlock));
-        sendArrow.SetValue(TextBlock.TextProperty, "↑");
-        sendArrow.SetValue(TextBlock.ForegroundProperty, Brushes.White);
-        sendArrow.SetValue(TextBlock.FontSizeProperty, 16.0);
-        sendArrow.SetValue(TextBlock.FontWeightProperty, FontWeights.Bold);
-        sendArrow.SetValue(TextBlock.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        sendArrow.SetValue(TextBlock.VerticalAlignmentProperty, VerticalAlignment.Center);
+        // Векторный «самолётик» отправки (как в Telegram) — без зависимости от шрифтов
+        var sendArrow = new FrameworkElementFactory(typeof(System.Windows.Shapes.Path));
+        sendArrow.SetValue(System.Windows.Shapes.Path.DataProperty, Geometry.Parse(IconSend));
+        sendArrow.SetValue(System.Windows.Shapes.Path.FillProperty, Brushes.White);
+        // Тонкая обводка со скруглёнными стыками — углы самолётика мягкие, как у соседних иконок
+        sendArrow.SetValue(System.Windows.Shapes.Path.StrokeProperty, Brushes.White);
+        sendArrow.SetValue(System.Windows.Shapes.Path.StrokeThicknessProperty, 1.0);
+        sendArrow.SetValue(System.Windows.Shapes.Path.StrokeLineJoinProperty, PenLineJoin.Round);
+        sendArrow.SetValue(FrameworkElement.WidthProperty, 16.0);
+        sendArrow.SetValue(FrameworkElement.HeightProperty, 16.0);
+        sendArrow.SetValue(System.Windows.Shapes.Path.StretchProperty, Stretch.Uniform);
+        sendArrow.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        sendArrow.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        // Лёгкий сдвиг вправо: оптический центр самолётика левее геометрического
+        sendArrow.SetValue(FrameworkElement.MarginProperty, new Thickness(1, 0, -1, 0));
         sendChrome.AppendChild(sendArrow);
         sendTemplate.VisualTree = sendChrome;
         var sendHover = new Trigger { Property = IsMouseOverProperty, Value = true };
@@ -323,17 +339,42 @@ internal sealed class ChatPanel : UserControl
             Visibility = Visibility.Collapsed,
             IsHitTestVisible = false
         };
+        // Пустой чат: иконка, приглашение и короткая подсказка действий (2.41) —
+        // раньше была только строчка текста на пустом поле
+        var emptyStack = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        emptyStack.Children.Add(new TextBlock
+        {
+            Text = "", // Message
+            FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"),
+            FontSize = 34,
+            Foreground = Ui.Tertiary,
+            TextAlignment = TextAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 10)
+        });
         _emptyHintText = new TextBlock
         {
             Text = DefaultEmptyHint,
-            Foreground = Ui.Tertiary,
+            Foreground = Ui.Muted,
             FontSize = 13,
             HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = TextAlignment.Center
         };
-        _emptyHint.Child = _emptyHintText;
+        emptyStack.Children.Add(_emptyHintText);
+        emptyStack.Children.Add(new TextBlock
+        {
+            Text = "Enter — отправить · скрепка слева — фото и файлы",
+            Foreground = Ui.Tertiary,
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            Margin = new Thickness(0, 6, 0, 0)
+        });
+        _emptyHint.Child = emptyStack;
         Grid.SetRow(_emptyHint, 2);
         _root.Children.Add(_emptyHint);
 
@@ -414,7 +455,9 @@ internal sealed class ChatPanel : UserControl
         SetSendEnabled(true);
         ClearAll();
         foreach (var entry in history) Append(entry);
-        _input.Focus();
+        // Фокус — после компоновки: прямой Focus() на ещё не отрисованной
+        // панели иногда «не липнет», и писать приходилось после клика (2.41)
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () => _input.Focus());
         Read?.Invoke();
     }
 
@@ -783,9 +826,13 @@ internal sealed class ChatPanel : UserControl
         // поэтому выглядит он точно как раньше, без рамки и фона
         var body = new TextBox
         {
+            // Имя файла — с нулевыми пробелами после разделителей: длинное имя без
+            // пробелов WPF не переносит и обрезает у края пузыря (2.41). Полное имя —
+            // ещё и в подсказке; «Копировать» в меню отдаёт чистое entry.FileName
             Text = entry.FileName.Length > 0
-                ? $"Файл: {entry.FileName}\n{FormatSize(entry.FileSize)}"
+                ? $"Файл: {BreakableFileName(entry.FileName)}\n{FormatSize(entry.FileSize)}"
                 : entry.Text,
+            ToolTip = entry.FileName.Length > 0 ? entry.FileName : null,
             Foreground = entry.Own ? Brushes.White : Ui.Ink,
             FontSize = 14,
             TextWrapping = TextWrapping.Wrap,
@@ -954,19 +1001,30 @@ internal sealed class ChatPanel : UserControl
     private const string IconEdit = "M20.71,7.04c0.39-0.39 0.39-1.04 0-1.41l-2.34-2.34c-0.37-0.39-1.02-0.39-1.41,0l-1.84,1.83 3.75,3.75M3,17.25V21h3.75L17.81,9.93l-3.75-3.75L3,17.25z";
     private const string IconPin = "M16,9V4h1c0.55,0 1-0.45 1-1s-0.45-1-1-1H7C6.45,2 6,2.45 6,3s0.45,1 1,1h1v5c0,1.66-1.34,3-3,3v2h5.97v7l1,1 1-1v-7H19v-2c-1.66,0-3-1.34-3-3z";
     private const string IconCopy = "M16,1H4C2.9,1 2,1.9 2,3v14h2V3h12V1zm3,4H8C6.9,5 6,5.9 6,7v14c0,1.1 0.9,2 2,2h11c1.1,0 2-0.9 2-2V7C21,5.9 20.1,5 19,5zm0,16H8V7h11v14z";
+    private const string IconSave = "M17,3H5C3.89,3 3,3.9 3,5v14c0,1.1 0.89,2 2,2h14c1.1,0 2-0.9 2-2V7l-4-4zm-5,16c-1.66,0-3-1.34-3-3s1.34-3 3-3 3,1.34 3,3-1.34,3-3,3zm3-10H5V5h10v4z";
+    private const string IconFolder = "M10,4H4C2.9,4 2.01,4.9 2.01,6L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2-0.9 2-2V8c0-1.1-0.9-2-2-2h-8l-2-2z";
+    private const string IconDelete = "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2-0.9 2-2V7H6v12zM19,4h-3.5l-1-1h-5l-1,1H5v2h14V4z";
+    private const string IconSend = "M2,21L23,12 2,3v7l15,2-15,2v7z";
+    // MDI paperclip (Material Design Icons, Apache 2.0) — сплошная заливка, в едином стиле
+    private const string IconPaperclip =
+        "M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5" +
+        "V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,0 12.5,18A2.5,2.5 0 0,0 15,15.5" +
+        "V5A4,4 0 0,0 11,1A4,4 0 0,0 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z";
 
     /// <summary>Пункт меню с векторной иконкой: цвета берутся из текущей темы оформления.</summary>
-    private static MenuItem BuildMenuItem(string text, string iconGeometry)
+    private static MenuItem BuildMenuItem(string text, string iconGeometry, Brush? color = null)
     {
         var icon = new System.Windows.Shapes.Path
         {
             Data = Geometry.Parse(iconGeometry),
-            Fill = Ui.Ink,
+            Fill = color ?? Ui.Ink,
             Width = 16,
             Height = 16,
             Stretch = Stretch.Uniform
         };
-        return new MenuItem { Header = text, Icon = icon };
+        var item = new MenuItem { Header = text, Icon = icon };
+        if (color is not null) item.Foreground = color;
+        return item;
     }
 
     /// <summary>Контекстное меню сообщения — как в Telegram.</summary>
@@ -1001,6 +1059,60 @@ internal sealed class ChatPanel : UserControl
             catch { }
         };
         menu.Items.Add(copy);
+
+        // Файловые действия — только у сообщений с файлом. Файл уже лежит на этом
+        // компьютере: «Сохранить как…» копирует его в выбранное место,
+        // «Показать в папке» открывает проводник с выделенным файлом.
+        if (entry.FileName.Length > 0)
+        {
+            var path = entry.FilePath;
+            var fileAvailable = path.Length > 0 && File.Exists(path);
+            const string waitTip = "Файл ещё передаётся — действие станет доступно после получения";
+
+            var saveAs = BuildMenuItem("Сохранить как…", IconSave);
+            saveAs.IsEnabled = fileAvailable;
+            if (!fileAvailable) saveAs.ToolTip = waitTip;
+            saveAs.Click += (_, _) => FileRowUi.SaveCopy(path, entry.FileName);
+            menu.Items.Add(saveAs);
+
+            var openFolder = BuildMenuItem("Показать в папке", IconFolder);
+            openFolder.IsEnabled = fileAvailable;
+            if (!fileAvailable) openFolder.ToolTip = waitTip;
+            openFolder.Click += (_, _) =>
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                        "explorer.exe", "/select,\"" + path + "\"") { UseShellExecute = true });
+                }
+                catch { }
+            };
+            menu.Items.Add(openFolder);
+        }
+
+        // Удаление. Своё ещё не доставленное — из очереди отправки (механика метки ✕:
+        // файл/сообщение не уйдёт собеседнику). Остальное — только из локальной истории,
+        // удаления «у всех» в протоколе нет, поэтому честно предупреждаем.
+        if (entry.Id.Length > 0)
+        {
+            var delete = BuildMenuItem("Удалить сообщение", IconDelete);
+            var ownQueued = entry.Own && entry.Delivery is not ("✓" or "✓✓");
+            var deleteId = entry.Id;
+            delete.Click += (_, _) =>
+            {
+                if (ownQueued)
+                {
+                    MessageDeleteRequested?.Invoke(_sessionId, deleteId);
+                    return;
+                }
+                var answer = MessageBox.Show(Window.GetWindow(this),
+                    "Удалить сообщение только на этом компьютере? У собеседника оно останется.",
+                    "СЕРВИС ЛЕГКО", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (answer == MessageBoxResult.Yes)
+                    LocalMessageDeleteRequested?.Invoke(_sessionId, deleteId);
+            };
+            menu.Items.Add(delete);
+        }
 
         menu.PlacementTarget = target;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
@@ -1197,10 +1309,13 @@ internal sealed class ChatPanel : UserControl
 
     public void SetPendingCount(int count, int fileCount)
     {
+        // Когда очередь пуста, полоса прячется целиком (2.41): зелёная строка
+        // «все сообщения доставлены» у верхней кромки не несла информации
+        _queuePanel.Visibility = count == 0 && fileCount == 0 ? Visibility.Collapsed : Visibility.Visible;
         _queueStatus.Text = count == 0
-            ? "● Все сообщения доставлены"
+            ? $"● Файлов в очереди: {fileCount}"
             : $"● В очереди: {count}" + (fileCount > 0 ? $" · файлов: {fileCount}" : "");
-        _queueStatus.Foreground = count == 0 ? Ui.Green : Ui.Accent;
+        _queueStatus.Foreground = Ui.Accent;
         _cancelFilesButton.Visibility = fileCount > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -1333,4 +1448,17 @@ internal sealed class ChatPanel : UserControl
         : bytes >= 1024 * 1024
             ? $"{bytes / 1024.0 / 1024.0:0.0} МБ"
             : $"{Math.Max(1, bytes / 1024)} КБ";
+
+    /// <summary>Имя файла с нулевыми пробелами после разделителей — чтобы WPF мог
+    /// переносить длинные имена без пробелов, а не обрезать их у края пузыря.</summary>
+    private static string BreakableFileName(string name)
+    {
+        var builder = new System.Text.StringBuilder(name.Length + 8);
+        foreach (var ch in name)
+        {
+            builder.Append(ch);
+            if (ch is '-' or '_' or '.' or ' ') builder.Append('\u200B');
+        }
+        return builder.ToString();
+    }
 }

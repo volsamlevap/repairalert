@@ -28,6 +28,10 @@ internal sealed class AppSettings
     public string Theme { get; set; } = "system";
     public List<string> RecentMasters { get; set; } = new();
     public int ReminderMinutes { get; set; } = 5;
+    /// <summary>Мастер: всплывающее уведомление Windows, когда менеджер сам завершает заявку (2.41).
+    /// Менеджер шлёт manager_completed при каждом переподключении — у мастера показывается
+    /// только один раз на факт завершения (см. MasterForm.CompleteJobFromManager).</summary>
+    public bool NotifyManagerCompleted { get; set; } = true;
 
     public void RememberMaster(string address) => RecentMastersLogic.Remember(RecentMasters, address);
 }

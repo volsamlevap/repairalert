@@ -53,6 +53,7 @@ internal sealed class RemoteJobInfo
     public string Device { get; set; } = "";
     public string Serial { get; set; } = "";
     public bool Urgent { get; set; }
+    public string Password { get; set; } = "";
 
     public static RemoteJobInfo FromMessage(AppMessage message) => new()
     {
@@ -69,7 +70,8 @@ internal sealed class RemoteJobInfo
         Client = message.Client,
         Device = message.Device,
         Serial = message.Serial,
-        Urgent = message.Urgent
+        Urgent = message.Urgent,
+        Password = message.Reason // пароль едет в Reason, см. AppMessage.JobRequest
     };
 
     /// <summary>Применить правку полей из JobInfo (2.35): только описание и реквизиты,
@@ -84,6 +86,7 @@ internal sealed class RemoteJobInfo
         if (Device != message.Device) { Device = message.Device; changed = true; }
         if (Serial != message.Serial) { Serial = message.Serial; changed = true; }
         if (Urgent != message.Urgent) { Urgent = message.Urgent; changed = true; }
+        if (Password != message.Reason) { Password = message.Reason; changed = true; }
         return changed;
     }
 

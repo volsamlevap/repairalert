@@ -93,6 +93,7 @@ internal static class ReportService
         if (details is not null && details.Client.Length > 0) report.AppendLine("Клиент: " + details.Client);
         if (details is not null && details.Device.Length > 0) report.AppendLine("Устройство: " + details.Device);
         if (details is not null && details.Serial.Length > 0) report.AppendLine("Серийный номер / IMEI: " + details.Serial);
+        if (details is not null && details.Password.Length > 0) report.AppendLine("Пароль устройства: " + details.Password);
         if (managerUser.Length > 0) report.AppendLine("Пользователь Windows (менеджер): " + managerUser);
         if (machineName.Length > 0) report.AppendLine("Компьютер менеджера: " + machineName);
         report.AppendLine("Дата и время начала: " + startedAt.ToString("dd.MM.yyyy HH:mm:ss"));
@@ -161,6 +162,7 @@ internal static class ReportService
             Row("Клиент", details.Client);
             Row("Устройство", details.Device);
             Row("Серийный номер / IMEI", details.Serial);
+            Row("Пароль устройства", details.Password);
         }
         Row("Пользователь Windows (менеджер)", managerUser);
         Row("Компьютер менеджера", machineName);

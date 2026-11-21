@@ -147,7 +147,10 @@ internal static class Ui
         app.Resources["DarkButton"] = dark;
         var success = new Style(typeof(Button), baseButton);
         success.Setters.Add(new Setter(Control.BackgroundProperty, Green));
-        success.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+        // В тёмной теме зелёный яркий (#30D158): белый текст на нём нечитаем (2.41),
+        // поэтому текст тёмный, как на акцентных кнопках Apple в Dark Mode
+        success.Setters.Add(new Setter(Control.ForegroundProperty,
+            IsDarkTheme ? FrozenBrush("#111113") : Brushes.White));
         app.Resources["SuccessButton"] = success;
         var danger = new Style(typeof(Button), baseButton);
         danger.Setters.Add(new Setter(Control.BackgroundProperty, FillSubtle));
@@ -185,6 +188,8 @@ internal static class Ui
         // Контекстные меню (правый клик по сообщению, «Отложить ▾») — в цветах темы оформления
         app.Resources[typeof(ContextMenu)] = Parse<Style>(ContextMenuStyleXaml);
         app.Resources[typeof(MenuItem)] = Parse<Style>(MenuItemStyleXaml);
+        // Подсказки (ToolTip): без стиля WPF рисует их системными — белыми в тёмной теме (2.41)
+        app.Resources[typeof(ToolTip)] = Parse<Style>(ToolTipStyleXaml);
 
         var text = new Style(typeof(TextBlock));
         text.Setters.Add(new Setter(TextBlock.ForegroundProperty, Ink));
@@ -319,6 +324,34 @@ internal static class Ui
                                 <Setter Property="Opacity" Value="0.45"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        """.Replace("%X%", X);
+
+    // Всплывающая подсказка: скруглённая карточка в цветах темы, без системного белого фона
+    private static readonly string ToolTipStyleXaml = """
+        <Style %X% TargetType="ToolTip">
+            <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource InkBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource SeparatorBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5,8,5"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="HasDropShadow" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.25" Color="Black"/>
+                            </Border.Effect>
+                            <ContentPresenter TextBlock.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -545,6 +578,23 @@ internal static class Ui
     }
 
     public static Button ActionButton(string text, string style = "", string iconGeometry = "")
+        => ActionButtonCore(text, style, iconGeometry.Length > 0 ? PathIcon(iconGeometry) : null);
+
+    /// <summary>Кнопка с текстом и готовым элементом-иконкой (например, QR из фигур — QrIcon).</summary>
+    public static Button ActionButton(string text, string style, FrameworkElement icon)
+        => ActionButtonCore(text, style, icon);
+
+    /// <summary>Векторная иконка из геометрии; цвет привязывается к цвету текста кнопки.</summary>
+    private static System.Windows.Shapes.Path PathIcon(string geometry) => new()
+    {
+        Data = Geometry.Parse(geometry),
+        Width = 16,
+        Height = 16,
+        Stretch = Stretch.Uniform,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
+    private static Button ActionButtonCore(string text, string style, FrameworkElement? icon)
     {
         var button = new Button
         {
@@ -562,19 +612,10 @@ internal static class Ui
         };
         content.SetBinding(TextBlock.ForegroundProperty,
             new System.Windows.Data.Binding(nameof(Button.Foreground)) { Source = button });
-        if (iconGeometry.Length > 0)
+        if (icon is not null)
         {
-            // Векторная иконка слева от текста; цвет привязан к цвету текста кнопки
-            var icon = new System.Windows.Shapes.Path
-            {
-                Data = Geometry.Parse(iconGeometry),
-                Width = 16,
-                Height = 16,
-                Stretch = Stretch.Uniform,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            icon.SetBinding(System.Windows.Shapes.Path.FillProperty,
-                new System.Windows.Data.Binding(nameof(Button.Foreground)) { Source = button });
+            // Цвет иконки привязан к цвету текста кнопки — следует за темой оформления
+            BindIconBrush(icon, button);
             content.Margin = new Thickness(7, 0, 0, 0);
             var row = new StackPanel
             {
@@ -591,6 +632,88 @@ internal static class Ui
         }
         if (style.Length > 0) button.SetResourceReference(Control.StyleProperty, style);
         return button;
+    }
+
+    /// <summary>Привязать цвет иконки к цвету текста кнопки: Path — заливка,
+    /// Canvas из QrIcon — кольца и точки.</summary>
+    internal static void BindIconBrush(FrameworkElement icon, Button button)
+    {
+        switch (icon)
+        {
+            case System.Windows.Shapes.Path path:
+                path.SetBinding(System.Windows.Shapes.Path.FillProperty,
+                    new System.Windows.Data.Binding(nameof(Button.Foreground)) { Source = button });
+                break;
+            case Canvas canvas:
+                foreach (var child in canvas.Children.OfType<System.Windows.Controls.Border>())
+                {
+                    if (child.Child is System.Windows.Controls.Border pupil)
+                    {
+                        child.SetBinding(System.Windows.Controls.Border.BorderBrushProperty,
+                            new System.Windows.Data.Binding(nameof(Button.Foreground)) { Source = button });
+                        pupil.SetBinding(System.Windows.Controls.Border.BackgroundProperty,
+                            new System.Windows.Data.Binding(nameof(Button.Foreground)) { Source = button });
+                    }
+                    else
+                    {
+                        child.SetBinding(System.Windows.Controls.Border.BackgroundProperty,
+                            new System.Windows.Data.Binding(nameof(Button.Foreground)) { Source = button });
+                    }
+                }
+                break;
+        }
+    }
+
+    /// <summary>Иконка QR-кода 16×16 из скруглённых фигур: три кольца-«глаза» с точками
+    /// и модули данных в углу. Без аргумента — бесцветная (цвет привяжет BindIconBrush);
+    /// с кистью — фиксированного цвета (кнопки на цветном фоне).</summary>
+    public static Canvas QrIcon(Brush? color = null)
+    {
+        var canvas = new Canvas { Width = 16, Height = 16 };
+        void Eye(double x, double y)
+        {
+            var eye = new Border
+            {
+                Width = 7,
+                Height = 7,
+                CornerRadius = new CornerRadius(1.8),
+                BorderThickness = new Thickness(1.3),
+                BorderBrush = color
+            };
+            eye.Child = new Border
+            {
+                Width = 2.2,
+                Height = 2.2,
+                CornerRadius = new CornerRadius(0.7),
+                Background = color,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Canvas.SetLeft(eye, x);
+            Canvas.SetTop(eye, y);
+            canvas.Children.Add(eye);
+        }
+        void Dot(double x, double y)
+        {
+            var dot = new Border
+            {
+                Width = 2.4,
+                Height = 2.4,
+                CornerRadius = new CornerRadius(0.7),
+                Background = color
+            };
+            Canvas.SetLeft(dot, x);
+            Canvas.SetTop(dot, y);
+            canvas.Children.Add(dot);
+        }
+        Eye(0, 0);
+        Eye(9, 0);
+        Eye(0, 9);
+        Dot(9.5, 9.5);
+        Dot(13, 9.5);
+        Dot(9.5, 13);
+        Dot(13, 13);
+        return canvas;
     }
 
     public static Grid ActionGrid(params Button[] buttons)
@@ -695,8 +818,24 @@ internal static class Ui
         Margin = new Thickness(0, 3, 0, 7)
     };
 
-    // Векторная шестерёнка (24×24) для кнопки «Настройки» — в едином стиле иконок программы
-    public const string IconSettings = "M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94zM12,15.6c-1.98,0-3.6-1.62-3.6-3.6s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z";
+    // Векторные иконки из набора Material Design Icons (Apache 2.0, pictogrammers.com) —
+    // проверенные пути 24×24, в едином стиле остальных иконок программы
+    public const string IconSettings =
+        "M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5" +
+        "M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37" +
+        "C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05" +
+        "C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42" +
+        "L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73" +
+        "C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97" +
+        "L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94" +
+        "C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58" +
+        "L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73" +
+        "L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z";
+
+    // Мини-панель (MDI picture-in-picture-bottom-right): окно с мини-панелью в углу
+    public const string IconMini =
+        "M19,11H11V17H19V11M23,19V5C23,3.88 22.1,3 21,3H3A2,2 0 0,0 1,5V19A2,2 0 0,0 3,21H21A2,2 0 0,0 23,19" +
+        "M21,19H3V4.97H21V19Z";
 
     private static BitmapImage? _logoImage;
 

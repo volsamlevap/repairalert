@@ -131,7 +131,7 @@ internal sealed class MasterForm : ChatHostForm
         titles.Children.Add(new TextBlock { Text = "Мастер", Foreground = Ui.Muted, FontSize = 11 });
         Grid.SetColumn(titles, 1);
         headerGrid.Children.Add(titles);
-        var miniButton = Ui.ActionButton("◱ Мини", "WhiteButton");
+        var miniButton = Ui.ActionButton("Мини", "WhiteButton", Ui.IconMini);
         miniButton.Height = 32;
         miniButton.MinHeight = 32;
         miniButton.FontSize = 12;
@@ -655,6 +655,19 @@ internal sealed class MasterForm : ChatHostForm
         startHidden.Unchecked += (_, _) => { _settings.StartHidden = false; SettingsStore.Save(_settings); };
         panel.Children.Add(startHidden);
         panel.Children.Add(SettingsUi.CloseOnSessionSwitchCheckBox(_settings, new Thickness(0, 0, 0, 8)));
+        var notifyCompleted = new CheckBox
+        {
+            Content = "Уведомлять, когда менеджер завершает заявку",
+            ToolTip = "Всплывающее уведомление Windows о завершении заявки менеджером. " +
+                      "Если галочку снять, заявка просто станет «Завершённой» в списке.",
+            IsChecked = _settings.NotifyManagerCompleted,
+            Foreground = Ui.Muted,
+            FontSize = 12,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        notifyCompleted.Checked += (_, _) => { _settings.NotifyManagerCompleted = true; SettingsStore.Save(_settings); };
+        notifyCompleted.Unchecked += (_, _) => { _settings.NotifyManagerCompleted = false; SettingsStore.Save(_settings); };
+        panel.Children.Add(notifyCompleted);
         panel.Children.Add(Ui.SectionTitle("Тихие часы"));
         panel.Children.Add(Ui.Note("В это время звуковые сигналы выключены, визуальные уведомления остаются. Оставьте поля пустыми, чтобы выключить режим."));
         var quietRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
@@ -1218,7 +1231,7 @@ internal sealed class MasterForm : ChatHostForm
         job.CurrentJobId, job.CurrentJobText, job.ClientId, job.UserName, job.MachineName,
         JobStatus.Of(job.IsJobAccepted, job.AwaitingReport, job.ReportSaved),
         job.ReceivedAt, job.StartedAt, job.CompletedAt, job.Comment,
-        job.Client, job.Device, job.Serial, job.Urgent);
+        job.Client, job.Device, job.Serial, job.Urgent, job.Password);
 
     /// <summary>Рассказать всем подключённым менеджерам о создании/смене состояния заявки.
     /// editorName — кто изменил заявку (для уведомления у автора); пусто — обычное обновление.</summary>
@@ -1288,6 +1301,7 @@ internal sealed class MasterForm : ChatHostForm
             Device = message.Device,
             Serial = message.Serial,
             Urgent = message.Urgent,
+            Password = message.Reason, // пароль едет в Reason, см. AppMessage.JobRequest
             ReceivedAt = DateTime.Now,
             StatusMessage = "Новая заявка — подтвердите получение."
         };
@@ -1333,6 +1347,7 @@ internal sealed class MasterForm : ChatHostForm
             Device = message.Device,
             Serial = message.Serial,
             Urgent = message.Urgent,
+            Password = message.Reason, // пароль едет в Reason, см. AppMessage.JobRequest
             ReceivedAt = DateTime.Now,
             StatusMessage = "Восстановленная заявка — подтвердите получение."
         };
@@ -1398,7 +1413,13 @@ internal sealed class MasterForm : ChatHostForm
                 _ = SendSafeDirectAsync(state.Connection, AppMessage.JobForceRemoved(message.JobId, "Мастер"));
             return;
         }
-        if (!state.Jobs.TryGetValue(message.JobId, out var job))
+        // Менеджер повторяет manager_completed при каждом переподключении
+        // (ResumeJobsAfterConnect шлёт все завершённые заявки). Уведомление
+        // показываем один раз — только когда это новая информация для мастера:
+        // заявка уже была в списке и отчёт ещё не был отмечен сохранённым.
+        var knownJob = state.Jobs.TryGetValue(message.JobId, out var job);
+        var alreadyReported = knownJob && job!.ReportSaved;
+        if (!knownJob)
         {
             job = new MasterJobRecord
             {
@@ -1411,7 +1432,7 @@ internal sealed class MasterForm : ChatHostForm
             };
             state.Jobs[job.CurrentJobId] = job;
         }
-        job.StartedAt = message.StartedAt?.ToLocalTime() ?? job.StartedAt;
+        job!.StartedAt = message.StartedAt?.ToLocalTime() ?? job.StartedAt;
         job.CompletedAt = message.CompletedAt?.ToLocalTime() ?? DateTime.Now;
         job.IsJobAccepted = false;
         job.AwaitingReport = false;
@@ -1423,8 +1444,11 @@ internal sealed class MasterForm : ChatHostForm
         _postponed.Remove(job.CurrentJobId);
         CloseChatSession(state.JobSessionKey(job.CurrentJobId));
         RefreshManagerList(state.ClientId, job.CurrentJobId);
-        WindowsNotifications.Show("Заявка завершена менеджером",
-            $"{state.UserName}: {ShortText(job.CurrentJobText)}");
+        if (_settings.NotifyManagerCompleted && knownJob && !alreadyReported)
+        {
+            WindowsNotifications.Show("Заявка завершена менеджером",
+                $"{state.UserName}: {ShortText(job.CurrentJobText)}");
+        }
         BroadcastJobInfo(job);
     }
 
@@ -1508,6 +1532,7 @@ internal sealed class MasterForm : ChatHostForm
         if (job.Device != message.Device) { job.Device = message.Device; changed = true; }
         if (job.Serial != message.Serial) { job.Serial = message.Serial; changed = true; }
         if (job.Urgent != message.Urgent) { job.Urgent = message.Urgent; changed = true; }
+        if (job.Password != message.Reason) { job.Password = message.Reason; changed = true; }
         return changed;
     }
 
@@ -1544,6 +1569,9 @@ internal sealed class MasterForm : ChatHostForm
         panel.Children.Add(Ui.Note("Серийный номер / IMEI:"));
         var serial = new TextBox { Text = job.Serial, MaxLength = 200, Margin = new Thickness(0, 2, 0, 8) };
         panel.Children.Add(serial);
+        panel.Children.Add(Ui.Note("Пароль устройства:"));
+        var password = new TextBox { Text = job.Password, MaxLength = 200, Margin = new Thickness(0, 2, 0, 8) };
+        panel.Children.Add(password);
         var urgent = new CheckBox
         {
             Content = "Срочная заявка",
@@ -1575,7 +1603,7 @@ internal sealed class MasterForm : ChatHostForm
                 return;
             }
             var edit = AppMessage.JobEdit(job.CurrentJobId, newText, client.Text.Trim(),
-                device.Text.Trim(), serial.Text.Trim(), urgent.IsChecked == true, "Мастер");
+                device.Text.Trim(), serial.Text.Trim(), urgent.IsChecked == true, "Мастер", password.Text.Trim());
             CloseSheet();
             if (!ApplyJobDescription(job, edit)) return;
             AppLog.Info($"Заявку изменил мастер: {job.CurrentJobId} · {ShortText(job.CurrentJobText)}");
@@ -1831,7 +1859,7 @@ internal sealed class MasterForm : ChatHostForm
             : "";
         _detailDescription.Text = rest;
         _detailDescription.Visibility = rest.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        var fieldsLine = ClientForm.JobFieldsLine(job.Client, job.Device, job.Serial);
+        var fieldsLine = ClientForm.JobFieldsLine(job.Client, job.Device, job.Serial, job.Password);
         _detailFields.Text = fieldsLine;
         _detailFields.Visibility = fieldsLine.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         _detailComment.Text = job.Comment.Length > 0 ? "Что сделано: " + job.Comment : "";
@@ -2171,56 +2199,8 @@ internal sealed class MasterForm : ChatHostForm
         }
         foreach (var file in files)
         {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var info = new StackPanel();
-            info.Children.Add(new TextBlock
-            {
-                Text = file.FileName,
-                FontSize = 14,
-                FontWeight = FontWeights.SemiBold,
-                TextWrapping = TextWrapping.NoWrap,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
-            info.Children.Add(new TextBlock
-            {
-                Text = $"{(file.Own ? "Вы" : file.Sender)} · {file.Time:dd.MM.yyyy HH:mm} · {(file.Delivery == "✓" ? "получен" : "в передаче")}",
-                Foreground = Ui.Muted,
-                FontSize = 12,
-                TextWrapping = TextWrapping.NoWrap,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 2, 0, 0)
-            });
-            row.Children.Add(info);
-            var open = Ui.ActionButton("Открыть", "ChipButton");
-            open.Height = 28;
-            open.MinHeight = 28;
-            open.VerticalAlignment = VerticalAlignment.Center;
-            var path = file.FilePath;
-            open.Click += (_, _) =>
-            {
-                try
-                {
-                    if (path.Length > 0 && File.Exists(path))
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
-                    else FileTransferService.OpenReceivedDirectory();
-                }
-                catch { }
-            };
-            Grid.SetColumn(open, 1);
-            row.Children.Add(open);
-            var card = new Border
-            {
-                Background = Brushes.Transparent,
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(10, 7, 10, 7),
-                Margin = new Thickness(0, 1, 0, 1),
-                Child = row
-            };
-            card.MouseEnter += (_, _) => card.Background = Ui.FillSubtle;
-            card.MouseLeave += (_, _) => card.Background = Brushes.Transparent;
-            _filesList.Children.Add(card);
+            // Строка с плиткой-иконкой, «Открыть» и «Сохранить копию…» — общий FileRowUi (2.41)
+            _filesList.Children.Add(FileRowUi.BuildRow(file));
         }
     }
 

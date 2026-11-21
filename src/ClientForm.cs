@@ -98,7 +98,8 @@ internal sealed class ClientForm : ChatHostForm
         public string Device { get; set; } = "";
         public string Serial { get; set; } = "";
         public bool Urgent { get; set; }
-        public JobDetails Details => new(Client, Device, Serial, Urgent);
+        public string Password { get; set; } = "";
+        public JobDetails Details => new(Client, Device, Serial, Urgent, Password);
     }
 
     public ClientForm() : base("manager")
@@ -527,7 +528,7 @@ internal sealed class ClientForm : ChatHostForm
         });
         Grid.SetColumn(titles, 1);
         grid.Children.Add(titles);
-        var mini = Ui.ActionButton("◱ Мини", "WhiteButton");
+        var mini = Ui.ActionButton("Мини", "WhiteButton", Ui.IconMini);
         mini.Height = 32;
         mini.MinHeight = 32;
         mini.FontSize = 12;
@@ -625,6 +626,7 @@ internal sealed class ClientForm : ChatHostForm
         detailsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         detailsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         detailsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        detailsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var clientInput = new TextBox { MinHeight = 34, Margin = new Thickness(0, 0, 5, 0), MaxLength = 80 };
         System.Windows.Automation.AutomationProperties.SetName(clientInput, "Клиент");
         var deviceInput = new TextBox { MinHeight = 34, Margin = new Thickness(5, 0, 0, 0), MaxLength = 80 };
@@ -635,11 +637,24 @@ internal sealed class ClientForm : ChatHostForm
         {
             Content = "Срочная заявка",
             FontSize = 13,
-            Foreground = Ui.Danger,
+            Foreground = Ui.Warning,
             FontWeight = FontWeights.SemiBold,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(7, 0, 0, 0)
+            VerticalAlignment = VerticalAlignment.Center
         };
+        // Плашка-подсветка в оранжевом (цвет предупреждений приложения):
+        // мягкий фон, при включённой галочке становится ярче
+        var urgentSoft = new SolidColorBrush(Color.FromArgb(31, 255, 159, 10));
+        var urgentSoftActive = new SolidColorBrush(Color.FromArgb(80, 255, 159, 10));
+        var urgentPill = new Border
+        {
+            Background = urgentSoft,
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(10, 6, 10, 8),
+            Margin = new Thickness(0, 8, 0, 0),
+            Child = urgentBox
+        };
+        urgentBox.Checked += (_, _) => urgentPill.Background = urgentSoftActive;
+        urgentBox.Unchecked += (_, _) => urgentPill.Background = urgentSoft;
         StackPanel Labeled(string label, Control field)
         {
             var stack = new StackPanel();
@@ -658,9 +673,15 @@ internal sealed class ClientForm : ChatHostForm
         var serialStack = Labeled("Серийный № / IMEI (необязательно)", serialInput);
         Grid.SetRow(serialStack, 1);
         detailsGrid.Children.Add(serialStack);
-        Grid.SetRow(urgentBox, 1);
-        Grid.SetColumn(urgentBox, 1);
-        detailsGrid.Children.Add(urgentBox);
+        var passwordInput = new TextBox { MinHeight = 34, Margin = new Thickness(5, 0, 0, 0), MaxLength = 80 };
+        System.Windows.Automation.AutomationProperties.SetName(passwordInput, "Пароль устройства");
+        var passwordStack = Labeled("Пароль устройства (необязательно)", passwordInput);
+        Grid.SetRow(passwordStack, 1);
+        Grid.SetColumn(passwordStack, 1);
+        detailsGrid.Children.Add(passwordStack);
+        Grid.SetRow(urgentPill, 2);
+        Grid.SetColumnSpan(urgentPill, 2);
+        detailsGrid.Children.Add(urgentPill);
         panel.Children.Add(detailsGrid);
 
         var attachments = new List<string>();
@@ -757,7 +778,7 @@ internal sealed class ClientForm : ChatHostForm
             RebuildChips();
         };
         // «С телефона» — QR-код: фото/видео/файлы с телефона попадают в этот же список вложений (2.40)
-        var fromPhone = Ui.ActionButton("📱 С телефона", "WhiteButton");
+        var fromPhone = Ui.ActionButton("С телефона", "WhiteButton", Ui.QrIcon());
         fromPhone.MinWidth = 140;
         fromPhone.Height = 32;
         fromPhone.MinHeight = 32;
@@ -804,7 +825,7 @@ internal sealed class ClientForm : ChatHostForm
         send.Click += async (_, _) =>
         {
             var details = new JobDetails(clientInput.Text.Trim(), deviceInput.Text.Trim(),
-                serialInput.Text.Trim(), urgentBox.IsChecked == true);
+                serialInput.Text.Trim(), urgentBox.IsChecked == true, passwordInput.Text.Trim());
             if (await SendJobAsync(input.Text.Trim(), details) is not string jobId) return;
             CloseSheet();
             // Все вложения новой заявки — одно сообщение в чате заявки
@@ -1216,7 +1237,8 @@ internal sealed class ClientForm : ChatHostForm
             Client = job.Client,
             Device = job.Device,
             Serial = job.Serial,
-            Urgent = job.Urgent
+            Urgent = job.Urgent,
+            Password = job.Password
         }).ToList();
 
     protected override bool IsKnownActiveJob(string jobId) =>
@@ -1258,7 +1280,8 @@ internal sealed class ClientForm : ChatHostForm
                 Client = record.Client,
                 Device = record.Device,
                 Serial = record.Serial,
-                Urgent = record.Urgent
+                Urgent = record.Urgent,
+                Password = record.Password
             };
         }
         if (_jobs.Count == 0 && CurrentJobId.Length > 0)
@@ -1536,56 +1559,8 @@ internal sealed class ClientForm : ChatHostForm
         }
         foreach (var file in files)
         {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var info = new StackPanel();
-            info.Children.Add(new TextBlock
-            {
-                Text = file.FileName,
-                FontSize = 14,
-                FontWeight = FontWeights.SemiBold,
-                TextWrapping = TextWrapping.NoWrap,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            });
-            info.Children.Add(new TextBlock
-            {
-                Text = $"{(file.Own ? "Вы" : file.Sender)} · {file.Time:dd.MM.yyyy HH:mm} · {(file.Delivery == "✓" ? "получен" : "в передаче")}",
-                Foreground = Ui.Muted,
-                FontSize = 12,
-                TextWrapping = TextWrapping.NoWrap,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 2, 0, 0)
-            });
-            row.Children.Add(info);
-            var open = Ui.ActionButton("Открыть", "ChipButton");
-            open.Height = 28;
-            open.MinHeight = 28;
-            open.VerticalAlignment = VerticalAlignment.Center;
-            var path = file.FilePath;
-            open.Click += (_, _) =>
-            {
-                try
-                {
-                    if (path.Length > 0 && File.Exists(path))
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
-                    else FileTransferService.OpenReceivedDirectory();
-                }
-                catch { }
-            };
-            Grid.SetColumn(open, 1);
-            row.Children.Add(open);
-            var card = new Border
-            {
-                Background = Brushes.Transparent,
-                CornerRadius = new CornerRadius(10),
-                Padding = new Thickness(10, 7, 10, 7),
-                Margin = new Thickness(0, 1, 0, 1),
-                Child = row
-            };
-            card.MouseEnter += (_, _) => card.Background = Ui.FillSubtle;
-            card.MouseLeave += (_, _) => card.Background = Brushes.Transparent;
-            _filesList.Children.Add(card);
+            // Строка с плиткой-иконкой, «Открыть» и «Сохранить копию…» — общий FileRowUi (2.41)
+            _filesList.Children.Add(FileRowUi.BuildRow(file));
         }
     }
 
@@ -1832,7 +1807,7 @@ internal sealed class ClientForm : ChatHostForm
                 : "";
             _detailDescription.Text = remoteRest;
             _detailDescription.Visibility = remoteRest.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-            var remoteFields = JobFieldsLine(remote.Client, remote.Device, remote.Serial);
+            var remoteFields = JobFieldsLine(remote.Client, remote.Device, remote.Serial, remote.Password);
             _detailFields.Text = remoteFields;
             _detailFields.Visibility = remoteFields.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             _detailComment.Text = remote.Comment.Length > 0 ? "Что сделано: " + remote.Comment : "";
@@ -1848,7 +1823,8 @@ internal sealed class ClientForm : ChatHostForm
                 : "Изменить можно при подключении к мастеру";
             var editRemoteTarget = remote;
             editRemote.Click += (_, _) => ShowJobEditSheet(editRemoteTarget.JobId, editRemoteTarget.Text,
-                editRemoteTarget.Client, editRemoteTarget.Device, editRemoteTarget.Serial, editRemoteTarget.Urgent);
+                editRemoteTarget.Client, editRemoteTarget.Device, editRemoteTarget.Serial, editRemoteTarget.Urgent,
+                editRemoteTarget.Password);
             _detailActions.Children.Add(editRemote);
             var delete = Ui.ActionButton("Удалить заявку", "DangerButton");
             delete.MinWidth = 150;
@@ -1909,7 +1885,7 @@ internal sealed class ClientForm : ChatHostForm
             : "";
         _detailDescription.Text = rest;
         _detailDescription.Visibility = rest.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        var fieldsLine = JobFieldsLine(job.Client, job.Device, job.Serial);
+        var fieldsLine = JobFieldsLine(job.Client, job.Device, job.Serial, job.Password);
         _detailFields.Text = fieldsLine;
         _detailFields.Visibility = fieldsLine.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         _detailComment.Text = job.Comment.Length > 0 ? "Что сделано: " + job.Comment : "";
@@ -2044,17 +2020,18 @@ internal sealed class ClientForm : ChatHostForm
             : "Изменить можно при подключении к мастеру";
         var editOwnJob = job;
         editOwn.Click += (_, _) => ShowJobEditSheet(editOwnJob.JobId, editOwnJob.Text,
-            editOwnJob.Client, editOwnJob.Device, editOwnJob.Serial, editOwnJob.Urgent);
+            editOwnJob.Client, editOwnJob.Device, editOwnJob.Serial, editOwnJob.Urgent, editOwnJob.Password);
         _detailActions.Children.Add(editOwn);
         _archiveUndoBar.Visibility = _archiveUndoJobId == job.JobId ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    internal static string JobFieldsLine(string client, string device, string serial)
+    internal static string JobFieldsLine(string client, string device, string serial, string password = "")
     {
         var parts = new List<string>();
         if (client.Length > 0) parts.Add("Клиент: " + client);
         if (device.Length > 0) parts.Add("Устройство: " + device);
         if (serial.Length > 0) parts.Add("SN/IMEI: " + serial);
+        if (password.Length > 0) parts.Add("Пароль: " + password);
         return string.Join("  ·  ", parts);
     }
 
@@ -2390,7 +2367,8 @@ internal sealed class ClientForm : ChatHostForm
             Client = details.Client,
             Device = details.Device,
             Serial = details.Serial,
-            Urgent = details.Urgent
+            Urgent = details.Urgent,
+            Password = details.Password
         };
         _jobs[job.JobId] = job;
         _jobsTabs.Select(0, false);
@@ -2480,7 +2458,8 @@ internal sealed class ClientForm : ChatHostForm
 
     /// <summary>Панель правки заявки (своей или чужой): описание и реквизиты.
     /// Правка уходит мастеру, мастер рассылает обновлённую карточку всем пользователям (2.35).</summary>
-    private void ShowJobEditSheet(string jobId, string text, string client, string device, string serial, bool urgent)
+    private void ShowJobEditSheet(string jobId, string text, string client, string device, string serial, bool urgent,
+        string password = "")
     {
         var panel = new StackPanel();
         panel.Children.Add(new TextBlock
@@ -2512,6 +2491,9 @@ internal sealed class ClientForm : ChatHostForm
         panel.Children.Add(Ui.Note("Серийный номер / IMEI:"));
         var serialBox = new TextBox { Text = serial, MaxLength = 200, Margin = new Thickness(0, 2, 0, 8) };
         panel.Children.Add(serialBox);
+        panel.Children.Add(Ui.Note("Пароль устройства:"));
+        var passwordBox = new TextBox { Text = password, MaxLength = 200, Margin = new Thickness(0, 2, 0, 8) };
+        panel.Children.Add(passwordBox);
         var urgentBox = new CheckBox
         {
             Content = "Срочная заявка",
@@ -2544,14 +2526,16 @@ internal sealed class ClientForm : ChatHostForm
             }
             CloseSheet();
             await SendJobEditAsync(jobId, newText, clientBox.Text.Trim(),
-                deviceBox.Text.Trim(), serialBox.Text.Trim(), urgentBox.IsChecked == true);
+                deviceBox.Text.Trim(), serialBox.Text.Trim(), urgentBox.IsChecked == true,
+                passwordBox.Text.Trim());
         };
         ShowSheet(panel, 460);
         textBox.Focus();
     }
 
     /// <summary>Отправить правку мастеру — он обновит заявку и разошлёт новую карточку всем.</summary>
-    private async Task SendJobEditAsync(string jobId, string text, string client, string device, string serial, bool urgent)
+    private async Task SendJobEditAsync(string jobId, string text, string client, string device, string serial, bool urgent,
+        string password = "")
     {
         if (_connection is null || !_authorized)
         {
@@ -2561,7 +2545,8 @@ internal sealed class ClientForm : ChatHostForm
         }
         try
         {
-            await _connection.SendAsync(AppMessage.JobEdit(jobId, text, client, device, serial, urgent, _managerName));
+            await _connection.SendAsync(AppMessage.JobEdit(jobId, text, client, device, serial, urgent, _managerName,
+                password));
             AppLog.Info("Отправлена правка заявки: " + jobId + " · " + ShortText(text));
         }
         catch { _connection.Disconnect(); }
@@ -2763,6 +2748,7 @@ internal sealed class ClientForm : ChatHostForm
         if (job.Device != message.Device) { job.Device = message.Device; changed = true; }
         if (job.Serial != message.Serial) { job.Serial = message.Serial; changed = true; }
         if (job.Urgent != message.Urgent) { job.Urgent = message.Urgent; changed = true; }
+        if (job.Password != message.Reason) { job.Password = message.Reason; changed = true; }
         if (!changed) return;
         PersistSession();
         // Во время полного снимка не тревожим; о собственной правке повторно не сообщаем
@@ -2937,6 +2923,7 @@ internal sealed class ClientForm : ChatHostForm
             Device = job.Device,
             Serial = job.Serial,
             Urgent = job.Urgent,
+            Password = job.Password,
             NotifyMasterCompleted = notifyMasterCompleted
         });
         PendingReportStore.Save(_pendingReports);

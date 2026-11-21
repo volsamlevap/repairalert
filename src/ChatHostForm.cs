@@ -38,6 +38,7 @@ internal abstract class ChatHostForm : BaseWindow
         panel.FileSend += (sessionId, path, batch) => _ = QueueFileMessageAsync(sessionId, path, batch);
         panel.CancelFiles += sessionId => CancelPendingFiles(sessionId);
         panel.MessageDeleteRequested += (sessionId, id) => DeleteQueuedMessage(sessionId, id);
+        panel.LocalMessageDeleteRequested += (sessionId, id) => DeleteLocalMessage(sessionId, id);
         panel.MessageEditRequested += (sessionId, id, text) => EditMessage(sessionId, id, text);
         panel.PinToggled += (sessionId, id) => TogglePin(sessionId, id);
         panel.PhoneUploadRequested += StartPhoneUpload;
@@ -595,6 +596,18 @@ internal abstract class ChatHostForm : BaseWindow
         PersistSession();
         UpdateQueueStatus();
         _ = FlushOutboxAsync();
+    }
+
+    /// <summary>Удалить сообщение только из локальной истории (контекстное меню чата).
+    /// У собеседника оно остаётся — удаления «у всех» в протоколе нет.</summary>
+    private void DeleteLocalMessage(string sessionId, string messageId)
+    {
+        if (sessionId.Length == 0 || messageId.Length == 0) return;
+        var history = History(sessionId);
+        if (history.RemoveAll(entry => entry.Id == messageId) == 0) return;
+        if (_chatSessionId == sessionId && _chatPanel is not null)
+            _chatPanel.RemoveMessages(new[] { messageId });
+        PersistSession();
     }
 
     /// <summary>Удалить неотправленное сообщение из очереди (и из истории чата).</summary>

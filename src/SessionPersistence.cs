@@ -34,6 +34,7 @@ internal sealed class ManagerJobRecord
     public string Device { get; set; } = "";
     public string Serial { get; set; } = "";
     public bool Urgent { get; set; }
+    public string Password { get; set; } = "";
 }
 
 internal sealed class ManagerArchiveEntry

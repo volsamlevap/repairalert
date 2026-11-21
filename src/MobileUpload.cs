@@ -300,10 +300,14 @@ internal static class MobileUploadService
             }
         }
         catch { }
-        return result
+        var ordered = result
             .GroupBy(item => item.Address.Ip).Select(g => g.OrderBy(item => item.Rank).First())
             .OrderBy(item => item.Rank).ThenBy(item => item.Address.Ip, StringComparer.Ordinal)
             .Select(item => item.Address).ToList();
+        // Первый в списке (обычная сеть со шлюзом) — тот, что нужен телефону в той же Wi‑Fi
+        if (ordered.Count > 0 && !ordered[0].IsTailscale)
+            ordered[0] = ordered[0] with { Label = ordered[0].Label + " — рекомендуемый" };
+        return ordered;
     }
 }
 

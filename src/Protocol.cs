@@ -49,9 +49,11 @@ internal static class MessageTypes
     public const string Ping = "ping";
 }
 
-internal sealed record JobDetails(string Client = "", string Device = "", string Serial = "", bool Urgent = false)
+internal sealed record JobDetails(string Client = "", string Device = "", string Serial = "", bool Urgent = false,
+    string Password = "")
 {
-    public bool HasAny => Client.Length > 0 || Device.Length > 0 || Serial.Length > 0 || Urgent;
+    public bool HasAny => Client.Length > 0 || Device.Length > 0 || Serial.Length > 0 || Urgent
+        || Password.Length > 0;
 }
 
 internal sealed class AppMessage
@@ -108,6 +110,10 @@ internal sealed class AppMessage
             message.Device = details.Device;
             message.Serial = details.Serial;
             message.Urgent = details.Urgent;
+            // Пароль едет в Reason: в job-сообщениях оно не используется,
+            // а новое поле сломало бы HMAC-подписи у старых версий
+            // (та же схема, что у пачки файлов в Comment).
+            message.Reason = details.Password;
         }
         return message;
     }
@@ -122,6 +128,7 @@ internal sealed class AppMessage
             message.Device = details.Device;
             message.Serial = details.Serial;
             message.Urgent = details.Urgent;
+            message.Reason = details.Password; // см. комментарий в JobRequest
         }
         return message;
     }
@@ -160,7 +167,8 @@ internal sealed class AppMessage
     /// SentAt несёт дату создания заявки (UTC), чтобы у всех сортировка была одинаковой.</summary>
     public static AppMessage JobInfo(string jobId, string text, string ownerClientId, string ownerName,
         string ownerMachine, string status, DateTime receivedAt, DateTime startedAt, DateTime completedAt,
-        string comment, string client, string device, string serial, bool urgent) => new()
+        string comment, string client, string device, string serial, bool urgent,
+        string password = "") => new()
     {
         Type = MessageTypes.JobInfo,
         JobId = jobId,
@@ -176,13 +184,14 @@ internal sealed class AppMessage
         Client = client,
         Device = device,
         Serial = serial,
-        Urgent = urgent
+        Urgent = urgent,
+        Reason = password // пароль едет в Reason, см. JobRequest
     };
 
     /// <summary>Правка полей заявки менеджером (или мастером — для единообразия).
     /// Меняются только описательные поля; статус и даты остаются как были.</summary>
     public static AppMessage JobEdit(string jobId, string text, string client, string device,
-        string serial, bool urgent, string sender) => new()
+        string serial, bool urgent, string sender, string password = "") => new()
     {
         Type = MessageTypes.JobEdit,
         JobId = jobId,
@@ -191,7 +200,8 @@ internal sealed class AppMessage
         Device = device,
         Serial = serial,
         Urgent = urgent,
-        Sender = sender
+        Sender = sender,
+        Reason = password // пароль едет в Reason, см. JobRequest
     };
 
     public static AppMessage ChatEdited(string jobId, string targetMessageId, string newText) => new()
