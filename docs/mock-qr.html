@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "DejaVu Sans", sans-serif; background: #e9e9ec; width: 520px; height: 800px; overflow: hidden; }
+  .win { width: 470px; margin: 16px auto 0; background: #f9f9f9; border: 1px solid #c9c9c9; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 34px rgba(0,0,0,.14); }
+  .titlebar { display: flex; align-items: center; gap: 8px; background: #efefef; border-bottom: 1px solid #e0e0e0; padding: 9px 12px; }
+  .dots { display: flex; gap: 5px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #c7c7c7; }
+  .titletext { font-size: 12px; color: #444; }
+  .content { padding: 20px 24px 20px; background: #ffffff; }
+  h1 { font-size: 20px; font-weight: 600; color: #1b1b1b; margin-bottom: 4px; }
+  .dest { font-size: 13px; color: #6b6b70; margin-bottom: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qrwrap { background: #fff; border: 1px solid #ececf0; border-radius: 14px; padding: 12px; width: 220px; margin: 0 auto 12px; }
+  .qrwrap img { width: 196px; height: 196px; display: block; }
+  .note { font-size: 12.5px; color: #6b6b70; line-height: 1.45; margin-bottom: 6px; }
+  .lbl { font-size: 12px; font-weight: 600; color: #1b1b1b; margin: 6px 0 3px; }
+  .combo { background: #fff; border: 1px solid #d5d5da; border-radius: 7px; padding: 8px 12px; font-size: 13px; color: #1b1b1b; display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .combo .chev { color: #8a8a90; font-size: 11px; }
+  .url { background: #f4f4f6; border: 1px solid #e2e2e6; border-radius: 7px; padding: 7px 12px; font-size: 12px; color: #55555a; margin-bottom: 10px; font-family: "Consolas", monospace; }
+  .fw { background: rgba(255,159,10,.12); border-radius: 9px; padding: 10px; margin-bottom: 10px; }
+  .fw p { font-size: 12px; color: #1b1b1b; line-height: 1.4; }
+  .fw .btn { display: inline-block; margin-top: 8px; background: #fff; border: 1.5px solid #d5d5da; border-radius: 8px; padding: 7px 14px; font-size: 12.5px; color: #1b1b1b; }
+  .status { font-size: 14px; font-weight: 600; color: #1b1b1b; margin: 4px 0 6px; }
+  .done { width: 100%; background: #0b6bcb; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; padding: 11px 0; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="titlebar">
+    <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+    <div class="titletext">Загрузка с телефона — СЕРВИС ЛЕГКО</div>
+  </div>
+  <div class="content">
+    <h1>Загрузить с телефона</h1>
+    <div class="dest">Куда: Чат заявки «ноутбук Lenovo V15 — не включается»</div>
+    <div class="qrwrap"><img src="qr-sample.png" alt="QR"></div>
+    <div class="note">Отсканируйте камерой iPhone (или Android) и выберите фото, видео или файлы. Телефон должен быть в той же Wi-Fi сети, что и этот компьютер. До 5 ГБ на файл.</div>
+    <div class="lbl">Адрес компьютера</div>
+    <div class="combo"><span>192.168.1.50 — рекомендуемый</span><span class="chev">▾</span></div>
+    <div class="url">http://192.168.1.50:47893/m/V7k2QpXr9LwZ3nT8aBcD…</div>
+    <div class="fw">
+      <p>Windows может блокировать приём файлов с телефона. Если страница на телефоне не открывается — разрешите порт в брандмауэре (один раз, понадобится подтверждение администратора).</p>
+      <span class="btn">Разрешить в брандмауэре</span>
+    </div>
+    <div class="status">Ожидаем подключения телефона…</div>
+    <button class="done">Готово</button>
+  </div>
+</div>
+</body>
+</html>

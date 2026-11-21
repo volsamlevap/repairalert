@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "DejaVu Sans", sans-serif; background: #e9e9ec; width: 1120px; height: 1120px; overflow: hidden; }
+  .win { width: 1040px; margin: 30px auto 0; background: #ffffff; border: 1px solid #d9d9de; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 34px rgba(0,0,0,.12); }
+  .content { padding: 40px 44px 34px; }
+  h1 { font-size: 33px; font-weight: 700; color: #1b1b1b; margin-bottom: 12px; }
+  .desc { font-size: 20px; color: #6b6b70; line-height: 1.45; margin-bottom: 26px; }
+  .area { background: #efeff3; border: none; border-radius: 14px; height: 205px; padding: 24px 26px; font-size: 22px; color: #1b1b1b; margin-bottom: 26px; }
+  .row { display: flex; gap: 34px; margin-bottom: 22px; }
+  .col { flex: 1; }
+  label { display: block; font-size: 18px; color: #55555a; margin-bottom: 9px; }
+  .field { background: #efeff3; border-radius: 12px; height: 68px; display: flex; align-items: center; padding: 0 22px; font-size: 22px; color: #1b1b1b; }
+  .field.placeholder { color: #9a9aa0; }
+  .urgent { display: flex; align-items: center; gap: 14px; background: rgba(255,159,10,.13); border: 1.5px solid rgba(255,159,10,.55); border-radius: 14px; padding: 16px 22px; margin: 4px 0 24px; }
+  .urgent .box { width: 26px; height: 26px; border-radius: 8px; background: #ff9f0a; display: flex; align-items: center; justify-content: center; }
+  .urgent .box svg { width: 17px; height: 17px; }
+  .urgent span { font-size: 21px; font-weight: 600; color: #c26a00; }
+  .chips { display: flex; gap: 16px; margin-bottom: 20px; }
+  .chip { background: #efeff3; border-radius: 10px; padding: 11px 18px; font-size: 19px; color: #1b1b1b; }
+  .chip b { font-weight: 400; color: #8a8a90; margin-left: 8px; }
+  .actions { display: flex; gap: 16px; margin-bottom: 34px; }
+  .btn-white { display: flex; align-items: center; gap: 10px; background: #fff; border: 1.5px solid #d5d5da; border-radius: 12px; padding: 13px 22px; font-size: 20px; color: #1b1b1b; }
+  .btn-white svg { width: 21px; height: 21px; }
+  .bottom { display: flex; justify-content: flex-end; align-items: center; gap: 26px; }
+  .btn-quiet { background: none; border: none; color: #6b6b70; font-size: 21px; padding: 10px 14px; }
+  .btn-primary { background: #0b6bcb; color: #fff; border: none; border-radius: 12px; font-size: 21px; font-weight: 600; padding: 16px 30px; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="content">
+    <h1>Новая заявка</h1>
+    <div class="desc">Опишите проблему — мастер увидит заявку сразу, как только будет связь.<br>Можно работать сразу с несколькими ремонтами.</div>
+    <div class="area">Не включается ноутбук Lenovo — чёрный экран, индикатор питания горит</div>
+    <div class="row">
+      <div class="col"><label>Клиент (необязательно)</label><div class="field">Иванов</div></div>
+      <div class="col"><label>Устройство (необязательно)</label><div class="field">ноутбук Lenovo V15</div></div>
+    </div>
+    <div class="row">
+      <div class="col"><label>Серийный № / IMEI (необязательно)</label><div class="field">PF3X9K21</div></div>
+      <div class="col"><label>Пароль устройства (необязательно)</label><div class="field">220222</div></div>
+    </div>
+    <div class="urgent">
+      <div class="box"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12.5 9.5 18 20 6.5"/></svg></div>
+      <span>Срочная заявка</span>
+    </div>
+    <div class="chips">
+      <div class="chip">plata-foto.jpg · 2,4 МБ<b>✕</b></div>
+      <div class="chip">video-sboj.mp4 · 18,1 МБ<b>✕</b></div>
+    </div>
+    <div class="actions">
+      <button class="btn-white">＋ Добавить файл</button>
+      <button class="btn-white">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#1b1b1b" stroke-width="2.2">
+          <rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/>
+          <rect x="6.2" y="6.2" width="0.6" height="0.6" fill="#1b1b1b"/><rect x="17.2" y="6.2" width="0.6" height="0.6" fill="#1b1b1b"/><rect x="6.2" y="17.2" width="0.6" height="0.6" fill="#1b1b1b"/>
+          <rect x="14" y="14" width="3" height="3" rx="0.8" fill="#1b1b1b" stroke="none"/><rect x="18" y="14" width="3" height="3" rx="0.8" fill="#1b1b1b" stroke="none"/><rect x="14" y="18" width="3" height="3" rx="0.8" fill="#1b1b1b" stroke="none"/><rect x="18" y="18" width="3" height="3" rx="0.8" fill="#1b1b1b" stroke="none"/>
+        </svg>
+        С телефона
+      </button>
+    </div>
+    <div class="bottom">
+      <button class="btn-quiet">Отмена</button>
+      <button class="btn-primary">Отправить заявку</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
