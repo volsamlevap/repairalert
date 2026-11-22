@@ -27,6 +27,14 @@ internal sealed class PhoneUploadWindow : BaseWindow
     private readonly Button _closeButton;
     private readonly Button _diagButton;
     private readonly TextBlock _diagText;
+    private readonly Border _qrBorder;
+    private readonly Grid _dualQrPanel;
+    private readonly Image _wifiQrImage;
+    private readonly Image _pageQrImage;
+    private readonly Border _hotspotBar;
+    private readonly TextBlock _hotspotText;
+    private readonly Button _hotspotButton;
+    private HotspotService.Session? _hotspot;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DateTime _openedAt = DateTime.Now;
     private int _uiUpdatePending;
@@ -104,7 +112,7 @@ internal sealed class PhoneUploadWindow : BaseWindow
             SnapsToDevicePixels = true
         };
         RenderOptions.SetBitmapScalingMode(_qrImage, BitmapScalingMode.NearestNeighbor);
-        root.Children.Add(new Border
+        _qrBorder = new Border
         {
             Background = Brushes.White,
             CornerRadius = new CornerRadius(14),
@@ -112,7 +120,22 @@ internal sealed class PhoneUploadWindow : BaseWindow
             HorizontalAlignment = HorizontalAlignment.Center,
             Child = _qrImage,
             Margin = new Thickness(0, 0, 0, 12)
-        });
+        };
+        root.Children.Add(_qrBorder);
+
+        // Режим раздачи (2.43): два QR рядом — Wi-Fi и страница. Скрыт, пока раздача не включена
+        _wifiQrImage = MakeQrImage(150);
+        _pageQrImage = MakeQrImage(150);
+        _dualQrPanel = new Grid { Margin = new Thickness(0, 0, 0, 12), Visibility = Visibility.Collapsed };
+        _dualQrPanel.ColumnDefinitions.Add(new ColumnDefinition());
+        _dualQrPanel.ColumnDefinitions.Add(new ColumnDefinition());
+        var wifiPanel = MakeQrPanel("Шаг 1 · Wi-Fi", _wifiQrImage);
+        Grid.SetColumn(wifiPanel, 0);
+        var pagePanel = MakeQrPanel("Шаг 2 · страница", _pageQrImage);
+        Grid.SetColumn(pagePanel, 1);
+        _dualQrPanel.Children.Add(wifiPanel);
+        _dualQrPanel.Children.Add(pagePanel);
+        root.Children.Add(_dualQrPanel);
 
         root.Children.Add(Ui.Note("Отсканируйте камерой iPhone (или Android) и выберите фото, видео или файлы. " +
                                   "Телефон должен быть в той же Wi‑Fi сети, что и этот компьютер. До 5 ГБ на файл."));
@@ -163,6 +186,34 @@ internal sealed class PhoneUploadWindow : BaseWindow
             Child = firewallStack
         };
         root.Children.Add(_firewallBar);
+
+        // Раздача Wi-Fi с компьютера (2.43): обход изоляции клиентов в офисных сетях —
+        // телефон подключается напрямую к сети этого ПК, интернет идёт через компьютер
+        _hotspotText = new TextBlock
+        {
+            Text = "Телефон и компьютер в разных сетях или офисный Wi‑Fi изолирует устройства? " +
+                   "Раздайте Wi‑Fi прямо с этого компьютера — телефон подключится напрямую, " +
+                   "а интернет на нём продолжит работать через компьютер.",
+            FontSize = 12,
+            Foreground = Ui.Ink,
+            TextWrapping = TextWrapping.Wrap
+        };
+        _hotspotButton = Ui.ActionButton("Раздать Wi-Fi с компьютера", "WhiteButton");
+        _hotspotButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _hotspotButton.Margin = new Thickness(0, 6, 0, 0);
+        _hotspotButton.Click += OnHotspotClick;
+        var hotspotStack = new StackPanel();
+        hotspotStack.Children.Add(_hotspotText);
+        hotspotStack.Children.Add(_hotspotButton);
+        _hotspotBar = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(26, 0, 113, 227)),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(10, 8, 10, 8),
+            Margin = new Thickness(0, 0, 0, 8),
+            Child = hotspotStack
+        };
+        root.Children.Add(_hotspotBar);
 
         _statusText = new TextBlock
         {
@@ -217,6 +268,7 @@ internal sealed class PhoneUploadWindow : BaseWindow
         {
             _timer.Stop();
             _session.Changed -= OnSessionChanged;
+            _hotspot?.Dispose(); // раздачу, включённую этим окном, выключаем
         };
     }
 
@@ -236,10 +288,24 @@ internal sealed class PhoneUploadWindow : BaseWindow
         if (_addressBox.SelectedItem is not PhoneAddress address) return;
         var url = MobileUploadService.BuildUrl(address.Ip, _session.Token);
         _urlBox.Text = url;
+        var pageBitmap = BuildQrBitmap(url);
+        if (_hotspot is not null)
+        {
+            _pageQrImage.Source = pageBitmap;
+            _wifiQrImage.Source ??= BuildQrBitmap(_hotspot.Credentials.BuildWifiQrPayload());
+        }
+        else
+        {
+            _qrImage.Source = pageBitmap;
+        }
+    }
+
+    private static BitmapImage? BuildQrBitmap(string payload)
+    {
         try
         {
             using var generator = new QRCoder.QRCodeGenerator();
-            using var data = generator.CreateQrCode(url, QRCoder.QRCodeGenerator.ECCLevel.M);
+            using var data = generator.CreateQrCode(payload, QRCoder.QRCodeGenerator.ECCLevel.M);
             var png = new QRCoder.PngByteQRCode(data).GetGraphic(10);
             var bitmap = new BitmapImage();
             using (var stream = new MemoryStream(png))
@@ -250,12 +316,93 @@ internal sealed class PhoneUploadWindow : BaseWindow
                 bitmap.EndInit();
             }
             bitmap.Freeze();
-            _qrImage.Source = bitmap;
+            return bitmap;
         }
         catch (Exception ex)
         {
             AppLog.Error("Не удалось построить QR-код", ex);
+            return null;
         }
+    }
+
+    private static Image MakeQrImage(double size)
+    {
+        var image = new Image
+        {
+            Width = size,
+            Height = size,
+            Stretch = Stretch.Uniform,
+            SnapsToDevicePixels = true
+        };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.NearestNeighbor);
+        return image;
+    }
+
+    private static StackPanel MakeQrPanel(string caption, Image image)
+    {
+        var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
+        panel.Children.Add(new TextBlock
+        {
+            Text = caption,
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 6)
+        });
+        panel.Children.Add(new Border
+        {
+            Background = Brushes.White,
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(10),
+            Child = image
+        });
+        return panel;
+    }
+
+    /// <summary>Включить раздачу Wi-Fi и переключить окно в режим двух QR (2.43).</summary>
+    private void OnHotspotClick(object sender, RoutedEventArgs e)
+    {
+        _hotspotButton.IsEnabled = false;
+        _hotspotButton.Content = "Включаем раздачу…";
+        _ = Task.Run(async () =>
+        {
+            var settings = SettingsStore.Load();
+            var (session, error) = await HotspotService.StartAsync(settings);
+            Dispatcher.BeginInvoke(() =>
+            {
+                if (session is null)
+                {
+                    _hotspotButton.IsEnabled = true;
+                    _hotspotButton.Content = "Раздать Wi-Fi с компьютера";
+                    _hotspotText.Text = "Не получилось включить раздачу. " + (error ?? "") +
+                                        " Можно ещё раз, либо используйте адрес Tailscale из списка выше.";
+                    return;
+                }
+                _hotspot = session;
+                ShowHotspotMode();
+            });
+        });
+    }
+
+    private void ShowHotspotMode()
+    {
+        if (_hotspot is null) return;
+        // Адрес раздачи — в список и выбранным: страница открывается по нему
+        if (_addressBox.ItemsSource is List<PhoneAddress> list)
+        {
+            var hotspotAddress = new PhoneAddress(_hotspot.Address,
+                _hotspot.Address + " — раздача этого компьютера — рекомендуемый", false);
+            if (!list.Any(a => a.Ip == _hotspot.Address)) list.Add(hotspotAddress);
+            _addressBox.SelectedItem = hotspotAddress;
+        }
+        _qrBorder.Visibility = Visibility.Collapsed;
+        _dualQrPanel.Visibility = Visibility.Visible;
+        _hotspotButton.Visibility = Visibility.Collapsed;
+        _hotspotText.Text = "Раздача включена: сеть «" + _hotspot.Credentials.Ssid +
+                            "». Шаг 1 — наведите камеру телефона на левый QR и подключитесь к сети " +
+                            "(в первый раз; потом телефон подключится сам). Шаг 2 — правый QR: " +
+                            "страница загрузки. Раздача выключится сама, когда закроете окно.";
+        UpdateQr();
     }
 
     private void UpdateStatus()
@@ -267,6 +414,8 @@ internal sealed class PhoneUploadWindow : BaseWindow
             _statusText.Foreground = Ui.Danger;
             _progress.Visibility = Visibility.Collapsed;
             _qrImage.Opacity = 0.25;
+            _pageQrImage.Opacity = 0.25;
+            _wifiQrImage.Opacity = 0.25;
             _timer.Stop();
             return;
         }

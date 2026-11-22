@@ -32,6 +32,10 @@ internal sealed class AppSettings
     /// Менеджер шлёт manager_completed при каждом переподключении — у мастера показывается
     /// только один раз на факт завершения (см. MasterForm.CompleteJobFromManager).</summary>
     public bool NotifyManagerCompleted { get; set; } = true;
+    /// <summary>Постоянные имя и пароль сети раздачи (2.43): телефон запоминает сеть
+    /// после первого подключения, дальше нужен только QR страницы.</summary>
+    public string HotspotSsid { get; set; } = "";
+    public string HotspotPass { get; set; } = "";
 
     public void RememberMaster(string address) => RecentMastersLogic.Remember(RecentMasters, address);
 }

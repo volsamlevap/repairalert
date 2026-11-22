@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/MobileUpload.cs" Link="MobileUpload.cs" />
+    <Compile Include="../../src/HotspotPlan.cs" Link="HotspotPlan.cs" />
     <Compile Include="../../src/MobileUploadPage.cs" Link="MobileUploadPage.cs" />
     <Compile Include="../../src/FileAndReportServices.cs" Link="FileAndReportServices.cs" />
     <Compile Include="../../src/StoragePaths.cs" Link="StoragePaths.cs" />

@@ -225,6 +225,23 @@ Check(addresses.All(a => a.Ip != "127.0.0.1" && !a.Ip.StartsWith("169.254.")), "
 Check(addresses.Count == 0 || !addresses[0].IsTailscale || addresses.All(a => a.IsTailscale),
     "первым предлагается обычная сеть, не Tailscale");
 
+Console.WriteLine("8. Хот-спот (2.43): имя/пароль и QR подключения к Wi-Fi");
+var creds = HotspotCredentials.Generate();
+Check(creds.Ssid.StartsWith("SERVIS-") && creds.Ssid.Length == 11, "имя сети вида SERVIS-XXXX");
+Check(creds.Passphrase.Length >= 8 && creds.Passphrase.Length <= 63, "пароль в пределах WPA2 (8..63)");
+var payload = creds.BuildWifiQrPayload();
+Check(payload.StartsWith("WIFI:T:WPA;S:") && payload.EndsWith(";;"), "QR формата WIFI: распознаётся камерой телефона");
+Check(payload.Contains(";S:" + creds.Ssid + ";") || payload.Contains(";S:" + creds.Ssid + "\\;"),
+    "в QR зашито имя сети");
+Check(payload.Contains(";P:" + creds.Passphrase + ";;"), "в QR зашит пароль");
+var tricky = new HotspotCredentials("My;Net\\Work", "p:a\"s,s");
+Check(tricky.BuildWifiQrPayload() == "WIFI:T:WPA;S:My\\;Net\\\\Work;P:p\\:a\\\"s\\,s;;",
+    "спецсимволы в имени и пароле экранируются по стандарту WIFI:");
+var hotspotAddresses = HotspotCredentials.FindHotspotAddresses();
+Check(hotspotAddresses.All(ip => ip.StartsWith("192.168.137.")),
+    "адреса раздачи — только из сети ICS 192.168.137.x");
+Console.WriteLine("       сейчас раздача " + (hotspotAddresses.Count > 0 ? "включена: " + hotspotAddresses[0] : "выключена (норма для теста)"));
+
 try { Directory.Delete(root, true); } catch { }
 Console.WriteLine(failures == 0 ? "\nВСЕ ПРОВЕРКИ ПРОЙДЕНЫ" : $"\nПРОВАЛЕНО ПРОВЕРОК: {failures}");
 return failures == 0 ? 0 : 1;
