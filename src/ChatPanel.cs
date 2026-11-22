@@ -1004,7 +1004,8 @@ internal sealed class ChatPanel : UserControl
     private const string IconReply = "M10,9V5l-7,7 7,7v-4.1c5,0 8.5,1.6 11,5.1-1-5.5-4.5-9.5-11-11z";
     private const string IconEdit = "M20.71,7.04c0.39-0.39 0.39-1.04 0-1.41l-2.34-2.34c-0.37-0.39-1.02-0.39-1.41,0l-1.84,1.83 3.75,3.75M3,17.25V21h3.75L17.81,9.93l-3.75-3.75L3,17.25z";
     private const string IconPin = "M16,9V4h1c0.55,0 1-0.45 1-1s-0.45-1-1-1H7C6.45,2 6,2.45 6,3s0.45,1 1,1h1v5c0,1.66-1.34,3-3,3v2h5.97v7l1,1 1-1v-7H19v-2c-1.66,0-3-1.34-3-3z";
-    private const string IconCopy = "M16,1H4C2.9,1 2,1.9 2,3v14h2V3h12V1zm3,4H8C6.9,5 6,5.9 6,7v14c0,1.1 0.9,2 2,2h11c1.1,0 2-0.9 2-2V7C21,5.9 20.1,5 19,5zm0,16H8V7h11v14z";
+    // MDI content-copy: передний квадрат залит, задний — контурная полоса (2.43)
+    private const string IconCopy = "M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z";
     private const string IconSave = "M17,3H5C3.89,3 3,3.9 3,5v14c0,1.1 0.89,2 2,2h14c1.1,0 2-0.9 2-2V7l-4-4zm-5,16c-1.66,0-3-1.34-3-3s1.34-3 3-3 3,1.34 3,3-1.34,3-3,3zm3-10H5V5h10v4z";
     private const string IconFolder = "M10,4H4C2.9,4 2.01,4.9 2.01,6L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2-0.9 2-2V8c0-1.1-0.9-2-2-2h-8l-2-2z";
     private const string IconDelete = "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2-0.9 2-2V7H6v12zM19,4h-3.5l-1-1h-5l-1,1H5v2h14V4z";
