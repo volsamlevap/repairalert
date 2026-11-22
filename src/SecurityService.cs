@@ -7,7 +7,7 @@ namespace RepairAlert;
 internal static class SecurityService
 {
     public const int ProtocolVersion = 2;
-    public const string AppVersion = "2.41";
+    public const string AppVersion = "2.42";
 
     public static string NewNonce() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
 

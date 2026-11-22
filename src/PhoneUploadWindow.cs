@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -24,6 +25,8 @@ internal sealed class PhoneUploadWindow : BaseWindow
     private readonly Button _firewallButton;
     private readonly ProgressBar _progress;
     private readonly Button _closeButton;
+    private readonly Button _diagButton;
+    private readonly TextBlock _diagText;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly DateTime _openedAt = DateTime.Now;
     private int _uiUpdatePending;
@@ -175,6 +178,29 @@ internal sealed class PhoneUploadWindow : BaseWindow
         _hintText.Visibility = Visibility.Collapsed;
         root.Children.Add(_hintText);
 
+        // Диагностика в раскрывающемся блоке (2.42): не перегружает окно, но позволяет
+        // на месте понять, почему телефон не открывает страницу (сервер / правило / адрес).
+        _diagButton = Ui.ActionButton("Запустить проверку", "WhiteButton");
+        _diagButton.HorizontalAlignment = HorizontalAlignment.Left;
+        _diagButton.Margin = new Thickness(0, 2, 0, 6);
+        _diagButton.Click += OnDiagClick;
+        _diagText = new TextBlock
+        {
+            Text = "Проверка покажет, что мешает телефону открыть страницу загрузки.",
+            FontSize = 12,
+            Foreground = Ui.Muted,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var diagStack = new StackPanel { Margin = new Thickness(0, 4, 0, 2) };
+        diagStack.Children.Add(_diagButton);
+        diagStack.Children.Add(_diagText);
+        root.Children.Add(new Expander
+        {
+            Header = new TextBlock { Text = "Страница не открывается? Диагностика", FontSize = 12, FontWeight = FontWeights.SemiBold },
+            Margin = new Thickness(0, 4, 0, 0),
+            Content = diagStack
+        });
+
         _closeButton = Ui.ActionButton("Готово", "PrimaryButton");
         _closeButton.Margin = new Thickness(0, 12, 0, 0);
         _closeButton.Click += (_, _) => Close();
@@ -321,6 +347,70 @@ internal sealed class PhoneUploadWindow : BaseWindow
                 }
             });
         });
+    }
+
+    /// <summary>Самопроверка приёма файлов с телефона (2.42): сервер, правило брандмауэра
+    /// и отклик страницы по выбранному адресу — с выводом, что делать дальше.</summary>
+    private void OnDiagClick(object sender, RoutedEventArgs e)
+    {
+        _diagButton.IsEnabled = false;
+        _diagButton.Content = "Проверяем…";
+        var ip = (_addressBox.SelectedItem as PhoneAddress)?.Ip;
+        var token = _session.Token;
+        Task.Run(() =>
+        {
+            var lines = new List<string>();
+            var loop = Probe("127.0.0.1", token);
+            lines.Add(loop
+                ? "✓ Сервер загрузки работает"
+                : "✗ Сервер загрузки не отвечает — закройте окно и откройте его заново");
+            var rule = FirewallService.RuleExists(MobileUploadService.Port);
+            lines.Add(rule == true
+                ? "✓ Правило брандмауэра на месте"
+                : rule == false
+                    ? "✗ Правила брандмауэра нет — нажмите «Разрешить в брандмауэре» выше"
+                    : "• Правило брандмауэра проверить не удалось");
+            bool? ext = null;
+            if (ip is not null)
+            {
+                ext = Probe(ip, token);
+                lines.Add(ext.Value
+                    ? $"✓ Страница отвечает по адресу {ip}"
+                    : $"✗ По адресу {ip} страница не отвечает — выберите другой адрес в списке выше");
+            }
+            string summary;
+            if (!loop)
+                summary = "Сервер не запустился. Закройте окно и попробуйте снова; если не поможет — перезапустите программу.";
+            else if (rule == false)
+                summary = "Создайте правило кнопкой выше — без него Windows блокирует входящие подключения с телефона.";
+            else if (ext == false)
+                summary = "По выбранному адресу страница недоступна. Выберите в списке другой адрес (обычно Wi‑Fi) и проверьте снова.";
+            else
+                summary = "Со стороны компьютера всё готово. Если телефон всё равно не открывает страницу — он в другой сети: " +
+                          "подключите его к той же Wi‑Fi, что и компьютер (не к гостевой сети и не к мобильному интернету), " +
+                          "а в роутере должна быть выключена «изоляция клиентов». В офисе Wi‑Fi часто изолирован от проводной " +
+                          "сети — тогда подключите компьютер к раздаче телефона или выберите адрес Tailscale " +
+                          "(на телефоне тоже должен быть включён Tailscale).";
+            Dispatcher.BeginInvoke(() =>
+            {
+                _diagButton.IsEnabled = true;
+                _diagButton.Content = "Запустить проверку";
+                _diagText.Text = string.Join("\n", lines) + "\n\n" + summary;
+                _diagText.Foreground = Ui.Ink;
+            });
+        });
+    }
+
+    /// <summary>Любой HTTP-ответ от страницы загрузки = сервер на связи по этому адресу.</summary>
+    private static bool Probe(string ip, string token)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            using var response = client.GetAsync(MobileUploadService.BuildUrl(ip, token)).GetAwaiter().GetResult();
+            return true;
+        }
+        catch { return false; }
     }
 
     private void OnClosingWindow(object? sender, System.ComponentModel.CancelEventArgs e)
